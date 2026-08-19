@@ -33,3 +33,9 @@ dev = [
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning:binance.ws.*",
+    "ignore::DeprecationWarning:websockets.legacy.*",
+    "ignore::DeprecationWarning:fastapi.applications.*",
+    "ignore::pytest.PytestUnhandledThreadExceptionWarning"
+]

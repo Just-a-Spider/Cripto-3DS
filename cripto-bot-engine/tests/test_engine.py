@@ -172,6 +172,14 @@ def test_format_and_validate_order():
     assert valid is False
     assert "below Binance minNotional" in reason
 
+    # BUY $5.10 USDT at $69,270.01 price (stepSize 0.00001 would floor to 0.00007 = $4.85, but should ceil to 0.00008 = $5.54)
+    state.usdt_balance = 100.0
+    valid, qty, usdt, reason = format_and_validate_order("BTCUSDT", "BUY", 5.10, 69270.01)
+    assert valid is True
+    assert qty == 0.00008
+    assert usdt >= 5.0
+    assert reason == "OK"
+
     # SELL valid: 0.00083 BTC at $60,000
     valid, qty, usdt, reason = format_and_validate_order("BTCUSDT", "SELL", 0.0, 60000.0, raw_qty=0.000832)
     assert valid is True
@@ -322,9 +330,11 @@ def test_gemini_state_and_config():
     from engine.state import state
     d = state.to_dict()
     assert "gemini_model" in d
+    assert "gemini_search_model" in d
     assert "has_gemini" in d
     assert "available_gemini_models" in d
-    assert d["gemini_model"] == "gemini-2.5-flash"
+    assert d["gemini_model"] == "gemini-3.1-flash-lite"
+    assert d["gemini_search_model"] == "gemini-2.5-flash"
 
 @pytest.mark.asyncio
 async def test_clear_trade_history():
@@ -546,6 +556,59 @@ async def test_manual_sell_execution():
     assert res_ok["realized_pnl_usdt"] == 0.50 # (1.05 - 1.00) * 10
     assert res_ok["realized_pnl_percent"] == 5.0 # +5.0%
     assert state.portfolio_balances.get("XRP", 0.0) == 0.0
+
+@pytest.mark.asyncio
+async def test_news_service_and_confluence():
+    import time
+    from engine.news_service import news_service, NewsItem
+    from engine.strategies import MultiTimeframeFilter
+
+    # 1. Test News Item & Risk Flag
+    news_service.cached_news = [
+        NewsItem("SEC launches lawsuit against XRP", "XRP", "CryptoPanic", "http://test", "HIGH_RISK", time.time())
+    ]
+    assert news_service.has_high_risk_event("XRP") is True
+    assert news_service.has_high_risk_event("BTC") is False
+
+    # 2. Test MultiTimeframeFilter Confluence
+    # Stable trend -> pass
+    stable_hist = [100.0, 101.0, 100.5, 102.0, 101.5, 103.0, 102.5, 104.0, 103.5, 105.0]
+    ok, reason = MultiTimeframeFilter.evaluate_confluence(stable_hist)
+    assert ok is True
+
+    # Severe macro drop (from 100 -> 90 = -10% drop) -> block
+    crash_hist = [100.0, 99.0, 98.0, 97.0, 95.0, 94.0, 93.0, 92.0, 91.0, 90.0]
+    blocked, block_reason = MultiTimeframeFilter.evaluate_confluence(crash_hist)
+    assert blocked is False
+    assert "Severe Macro Drop" in block_reason
+
+@pytest.mark.asyncio
+async def test_google_search_grounding_provider():
+    from engine.news_service import GoogleSearchGroundingProvider
+    provider = GoogleSearchGroundingProvider(api_key="")
+    items = await provider.fetch_news(["BTC", "ETH"])
+    assert len(items) > 0
+    assert items[0].asset in ["BTC", "ETH", "MARKET"]
+
+@pytest.mark.asyncio
+async def test_manual_buy_execution():
+    from engine.state import state
+    from engine.trades import execute_manual_buy
+    
+    state.prices["SOLUSDT"] = 150.0
+    state.usdt_balance = 100.0
+    state.portfolio_balances["SOL"] = 0.0
+
+    # 1. Invalid PIN -> Error
+    res_err = await execute_manual_buy("SOL", 10.0, "wrong_pin")
+    assert res_err["status"] == "error"
+
+    # 2. Valid execution
+    res = await execute_manual_buy("SOL", 15.0, state.auth_pin)
+    assert res["status"] == "success"
+    assert res["pair"] == "SOLUSDT"
+    assert res["bought_usdt"] == 15.0
+    assert state.portfolio_balances["SOL"] > 0
 
 
 

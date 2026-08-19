@@ -16,20 +16,10 @@ from engine.telemetry import start_3ds_tcp_server
 from engine.watchdogs import trade_timeout_watchdog, cost_basis_watchdog
 from engine.binance_client import start_binance_websocket
 
-app = FastAPI(title="Cripto-3DS Bot Engine")
+from contextlib import asynccontextmanager
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(api_router)
-
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     await init_db()
     
     saved_cfg = await load_config_item("risk_config")
@@ -58,7 +48,8 @@ async def startup_event():
         state.discord_bot_token = saved_cfg.get("discord_bot_token", os.getenv("DISCORD_BOT_TOKEN", ""))
         state.discord_channel_id = saved_cfg.get("discord_channel_id", os.getenv("DISCORD_CHANNEL_ID", ""))
         state.gemini_api_key = saved_cfg.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))
-        state.gemini_model = saved_cfg.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
+        state.gemini_model = saved_cfg.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"))
+        state.gemini_search_model = saved_cfg.get("gemini_search_model", os.getenv("GEMINI_SEARCH_MODEL", "gemini-2.5-flash"))
             
         enc_api = saved_cfg.get("api_key", "")
         enc_sec = saved_cfg.get("secret_key", "")
@@ -101,6 +92,21 @@ async def startup_event():
     asyncio.create_task(trade_timeout_watchdog())
     asyncio.create_task(cost_basis_watchdog())
     asyncio.create_task(start_binance_websocket())
+
+    yield
+    logger.info("Engine services shutting down cleanly.")
+
+app = FastAPI(title="Cripto-3DS Bot Engine", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(api_router)
 
 if __name__ == "__main__":
     if os.environ.get("HEADLESS", "false").lower() == "true":
