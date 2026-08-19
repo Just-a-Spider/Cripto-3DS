@@ -9,6 +9,10 @@ DB_PATH = "bot_data.db"
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
+        # Enable Write-Ahead Logging (WAL) and optimized sync for 24/7 flash stability & zero lock contention
+        await db.execute("PRAGMA journal_mode = WAL;")
+        await db.execute("PRAGMA synchronous = NORMAL;")
+        
         await db.execute("""
             CREATE TABLE IF NOT EXISTS bot_config (
                 key TEXT PRIMARY KEY,

@@ -174,7 +174,7 @@ rsync -avz --exclude '.venv' --exclude 'bot_data.db' --exclude '__pycache__' --e
   u0_a277@moto-e20:~/cripto-bot-engine/
 ```
 
-#### 2. Auto-Start Daemon on Phone Boot (`~/.termux/boot/start-cripto.sh`):
+#### 2. Auto-Start Daemon on Phone Boot (`~/.termux/boot/start_cripto.sh`):
 ```bash
 #!/data/data/com.termux/files/usr/bin/bash
 termux-wake-lock
@@ -188,7 +188,7 @@ HEADLESS=true python main.py >> engine.log 2>&1 &
 ```bash
 # Restart server
 pkill -f "python main.py"
-~/.termux/boot/start-cripto.sh
+~/.termux/boot/start_cripto.sh
 
 # View live logs
 tail -f ~/cripto-bot-engine/engine.log
