@@ -458,4 +458,95 @@ async def test_market_briefing(monkeypatch):
     assert embed is not None
     assert "Bitcoin Consolidates" in embed.title
 
+@pytest.mark.asyncio
+async def test_evaluate_exit_momentum(monkeypatch):
+    from engine.ai_analyst import evaluate_exit_momentum
+    import engine.ai_analyst as ai_mod
+
+    # 1. Test fallback when no key
+    res_no_key = await evaluate_exit_momentum("ETHUSDT", 2000.0, 1800.0, 78.0, 1.15, [], api_key="")
+    assert res_no_key["verdict"] == "TRAIL"
+    assert res_no_key["trail_delta_percent"] == 1.5
+
+    # 2. Test mocked Gemini momentum response
+    async def mock_call_gemini(*args, **kwargs):
+        return """```json
+{
+  "verdict": "TRAIL",
+  "trail_delta_percent": 1.2,
+  "momentum_phase": "PARABOLIC_BREAKOUT",
+  "summary": "Strong continuous green candles. Trail peak with 1.2% delta."
+}
+```"""
+    monkeypatch.setattr(ai_mod, "call_gemini", mock_call_gemini)
+
+    res = await evaluate_exit_momentum("ETHUSDT", 2050.0, 1877.0, 81.2, 1.22, [1900, 1950, 2000, 2050], api_key="valid_key")
+    assert res["verdict"] == "TRAIL"
+    assert res["trail_delta_percent"] == 1.2
+    assert res["momentum_phase"] == "PARABOLIC_BREAKOUT"
+
+@pytest.mark.asyncio
+async def test_trailing_profit_runner_handoff():
+    from engine.state import state
+    from engine.strategies import RSIStrategy, TPSLStrategy
+
+    state.tpsl_strategy = TPSLStrategy(trailing_enabled=True, trailing_activation_percent=3.0, trailing_delta_percent=1.5)
+    rsi_strat = RSIStrategy(oversold_rsi=30.0, overbought_rsi=70.0, min_profit_percent=5.0)
+    rsi_strat.enabled = True
+
+    # Populate price history (ending below $2000 so $2000 is an upward step)
+    rsi_strat.price_histories["ETHUSDT"] = [1800.0 + (i * 5.0) for i in range(30)] # 1800 -> 1945
+    portfolio = {"ETH": 0.05} # Worth > $5
+    cost_bases = {"ETHUSDT": 1877.0}
+    prices = {"ETHUSDT": 2000.0} # +6.55% profit
+
+    # When RSI is overbought and trailing is enabled, RSI strategy hands off to TPSL peak tracker rather than instant dumping
+    sig = rsi_strat.evaluate(prices, 50.0, ["ETHUSDT"], portfolio, cost_bases)
+    assert sig is None # Did not dump statically!
+    assert state.tpsl_strategy.peak_prices.get("ETHUSDT") == 2000.0 # Peak registered!
+
+    # Now simulate price surging to $2,067
+    prices["ETHUSDT"] = 2067.0
+    tpsl_sig = state.tpsl_strategy.evaluate_tpsl(prices, portfolio, cost_bases)
+    assert tpsl_sig is None # Still riding the pump!
+    assert state.tpsl_strategy.peak_prices.get("ETHUSDT") == 2067.0
+
+    # Now simulate a 2% pullback from peak ($2067 -> $2020)
+    prices["ETHUSDT"] = 2020.0
+    exit_sig = state.tpsl_strategy.evaluate_tpsl(prices, portfolio, cost_bases)
+    assert exit_sig is not None
+    assert exit_sig["action"] == "SELL"
+    assert "Trailing Stop" in exit_sig["reason"]
+
+@pytest.mark.asyncio
+async def test_manual_sell_execution():
+    from engine.state import state
+    from engine.trades import execute_manual_sell
+
+    state.auth_pin = "1234"
+    state.portfolio_balances["XRP"] = 10.0
+    state.prices["XRPUSDT"] = 1.05
+    state.cost_bases["XRPUSDT"] = 1.00
+
+    # 1. Test invalid PIN
+    res_bad_pin = await execute_manual_sell("XRP", 100.0, "9999")
+    assert res_bad_pin["status"] == "error"
+    assert "Invalid PIN" in res_bad_pin["message"]
+
+    # 2. Test sell value below $5.00 MIN_NOTIONAL (selling 20% of 10 XRP = 2 XRP = $2.10)
+    res_dust = await execute_manual_sell("XRP", 20.0, "1234")
+    assert res_dust["status"] == "error"
+    assert "below minNotional" in res_dust["message"].lower() or "dust" in res_dust["message"].lower()
+
+    # 3. Test successful sell (selling 100% of 10 XRP = $10.50)
+    res_ok = await execute_manual_sell("XRP", 100.0, "1234")
+    assert res_ok["status"] == "success"
+    assert res_ok["sold_qty"] == 10.0
+    assert res_ok["amount_usdt"] == 10.50
+    assert res_ok["realized_pnl_usdt"] == 0.50 # (1.05 - 1.00) * 10
+    assert res_ok["realized_pnl_percent"] == 5.0 # +5.0%
+    assert state.portfolio_balances.get("XRP", 0.0) == 0.0
+
+
+
 

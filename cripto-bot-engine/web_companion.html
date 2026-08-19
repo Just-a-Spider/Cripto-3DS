@@ -232,6 +232,7 @@
                 <button class="btn btn-red" onclick="toggleBot(false)">⏸ PAUSE</button>
                 <button class="btn btn-yellow" onclick="triggerSimulatedTrade()">TEST BUY</button>
                 <button class="btn btn-yellow" onclick="forceEvaluate()">FORCE CHECK</button>
+                <button class="btn btn-blue" onclick="syncBalances()">🔄 SYNC BALANCES</button>
             </div>
         </div>
 
@@ -293,6 +294,64 @@
         <div class="card">
             <h3>System Logs</h3>
             <div class="terminal" id="terminal-logs">Loading logs...</div>
+        </div>
+    </div>
+
+    <!-- MANUAL SELL MODAL -->
+    <div id="manual-sell-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:1000; justify-content:center; align-items:center;">
+        <div class="modal-content" style="max-width: 420px; width: 90%; background: var(--card-bg, #282a36); border: 2px solid var(--red, #ff5555); border-radius: 12px; padding: 20px;">
+            <div class="header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 15px;">
+                <h2 style="margin:0; color:var(--red, #ff5555); font-size: 1.3rem;">🔴 Manual Sell <span id="sell-modal-asset"></span></h2>
+                <button class="btn btn-red" style="padding: 4px 10px;" onclick="closeManualSellModal()">✖</button>
+            </div>
+
+            <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; margin-bottom: 15px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom: 6px;">
+                    <span style="color:var(--comment);">Current Price:</span>
+                    <strong id="sell-modal-price">$0.00</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom: 6px;">
+                    <span style="color:var(--comment);">Total Balance:</span>
+                    <strong id="sell-modal-total-qty">0.00</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="color:var(--comment);">Total Value:</span>
+                    <strong id="sell-modal-total-val" style="color:var(--cyan);">$0.00</strong>
+                </div>
+            </div>
+
+            <label style="font-weight:bold; display:block; margin-bottom: 6px;">Sell Quantity / Preset:</label>
+            <div style="display:flex; gap: 8px; margin-bottom: 15px;">
+                <button class="btn btn-blue" style="flex:1; padding: 6px;" onclick="setSellPercent(25)">25%</button>
+                <button class="btn btn-blue" style="flex:1; padding: 6px;" onclick="setSellPercent(50)">50%</button>
+                <button class="btn btn-blue" style="flex:1; padding: 6px;" onclick="setSellPercent(75)">75%</button>
+                <button class="btn btn-red" style="flex:1; padding: 6px;" onclick="setSellPercent(100)">100% (ALL)</button>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="font-size:0.85rem; color:var(--comment);">Custom Percentage:</label>
+                <input type="range" id="sell-percent-range" min="1" max="100" value="100" style="width:100%; margin: 8px 0;" oninput="onSellPercentChange(this.value)">
+                <div style="display:flex; justify-content:space-between; font-size: 0.9rem;">
+                    <span>Selected: <strong id="sell-percent-label">100%</strong></span>
+                    <span>Est. Sell Value: <strong id="sell-est-value" style="color:var(--green);">$0.00</strong></span>
+                </div>
+                <div style="font-size: 0.78rem; color: var(--comment); margin-top: 4px;">
+                    Est. Binance Fee (0.10%): <span id="sell-est-fee" style="color: var(--yellow);">$0.00</span>
+                </div>
+            </div>
+
+            <div id="sell-min-warning" style="display:none; color:var(--red); font-size:0.85rem; font-weight:bold; margin-bottom:12px; text-align:center;">
+                ⚠️ Minimum Binance order value is $5.00 USDT.
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="font-weight:bold; font-size:0.85rem;">Auth PIN:</label>
+                <input type="password" id="sell-pin-input" placeholder="Enter PIN" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--btn-shadow); background:rgba(0,0,0,0.3); color:#fff; text-align:center; font-size:1.1rem; letter-spacing:4px;">
+            </div>
+
+            <button id="btn-execute-sell" class="btn btn-red" style="width:100%; padding:12px; font-weight:bold; font-size:1rem;" onclick="submitManualSell()">
+                🔴 EXECUTE MARKET SELL
+            </button>
         </div>
     </div>
 
@@ -497,7 +556,15 @@
                 
                 // Render Top 10
                 assets.slice(0, 10).forEach(a => {
-                    portHtml += `<div class="price-item"><span>${a.asset} <small>(${a.amount})</small></span><strong>$${a.val.toFixed(2)}</strong></div>`;
+                    const sellBtn = a.val >= 0.50 ? `<button class="btn btn-red" style="padding: 2px 8px; font-size: 0.72rem; margin-left: 8px;" onclick="openManualSellModal('${a.asset}', ${a.amount}, ${a.val}, ${a.price})">SELL</button>` : '';
+                    portHtml += `
+                        <div class="price-item" style="display:flex; justify-content:space-between; align-items:center;">
+                            <span>${a.asset} <small>(${a.amount})</small></span>
+                            <div style="display:flex; align-items:center;">
+                                <strong>$${a.val.toFixed(2)}</strong>
+                                ${sellBtn}
+                            </div>
+                        </div>`;
                 });
                 
                 if (assets.length > 10) {
@@ -948,6 +1015,115 @@
 
         function showSettings() {
             document.getElementById('settings-modal').style.display = 'flex';
+        }
+
+        let activeSellAsset = null;
+        let activeSellAmount = 0;
+        let activeSellVal = 0;
+        let activeSellPrice = 0;
+
+        function openManualSellModal(asset, amount, val, price) {
+            activeSellAsset = asset;
+            activeSellAmount = amount;
+            activeSellVal = val;
+            activeSellPrice = price;
+
+            document.getElementById('sell-modal-asset').innerText = `(${asset})`;
+            document.getElementById('sell-modal-price').innerText = price ? `$${price.toLocaleString()}` : 'Live Ticker';
+            document.getElementById('sell-modal-total-qty').innerText = `${amount} ${asset}`;
+            document.getElementById('sell-modal-total-val').innerText = `$${val.toFixed(2)} USDT`;
+            document.getElementById('sell-pin-input').value = authPin || '';
+
+            setSellPercent(100);
+            document.getElementById('manual-sell-modal').style.display = 'flex';
+        }
+
+        function closeManualSellModal() {
+            document.getElementById('manual-sell-modal').style.display = 'none';
+        }
+
+        function setSellPercent(pct) {
+            document.getElementById('sell-percent-range').value = pct;
+            onSellPercentChange(pct);
+        }
+
+        function onSellPercentChange(pct) {
+            pct = parseFloat(pct);
+            document.getElementById('sell-percent-label').innerText = `${pct}%`;
+            const estVal = activeSellVal * (pct / 100.0);
+            const estFee = estVal * 0.001; // 0.10% Binance Spot fee
+            document.getElementById('sell-est-value').innerText = `$${estVal.toFixed(2)} USDT`;
+            document.getElementById('sell-est-fee').innerText = `$${estFee.toFixed(4)} USDT`;
+
+            const warningEl = document.getElementById('sell-min-warning');
+            const submitBtn = document.getElementById('btn-execute-sell');
+            if (estVal < 5.0) {
+                warningEl.style.display = 'block';
+                submitBtn.disabled = true;
+                submitBtn.style.opacity = '0.5';
+            } else {
+                warningEl.style.display = 'none';
+                submitBtn.disabled = false;
+                submitBtn.style.opacity = '1.0';
+            }
+        }
+
+        async function submitManualSell() {
+            const pct = parseFloat(document.getElementById('sell-percent-range').value);
+            const pin = document.getElementById('sell-pin-input').value;
+            if (!pin) {
+                alert("⚠️ Please enter your Auth PIN.");
+                return;
+            }
+
+            const estVal = activeSellVal * (pct / 100.0);
+            if (estVal < 5.0) {
+                alert("⚠️ Minimum Binance order value is $5.00 USDT. Please increase sell percentage.");
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to SELL ${pct}% of ${activeSellAsset} (~$${estVal.toFixed(2)} USDT)?`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(getApiBase() + '/api/manual_sell', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-PIN': pin
+                    },
+                    body: JSON.stringify({
+                        asset: activeSellAsset,
+                        percent: pct,
+                        pin: pin
+                    })
+                });
+
+                const data = await res.json();
+                if (res.ok && data.status === 'success') {
+                    alert(`✅ Successfully sold ${data.sold_qty} ${data.pair}! Realized PnL: $${data.realized_pnl_usdt >= 0 ? '+' : ''}${data.realized_pnl_usdt} (${data.realized_pnl_percent}%)`);
+                    closeManualSellModal();
+                    await fetchTrades();
+                } else {
+                    alert(`❌ Sell Failed: ${data.message || 'Unknown error'}`);
+                }
+            } catch(e) {
+                alert(`❌ Network/Server Error: ${e.message}`);
+            }
+        }
+
+        async function syncBalances() {
+            try {
+                const res = await fetch(getApiBase() + '/api/balance/sync', {
+                    method: 'POST',
+                    headers: { 'X-Auth-PIN': authPin }
+                });
+                const data = await res.json();
+                alert(`✅ Synced Binance Balances! USDT: $${data.usdt_balance.toFixed(2)}`);
+            } catch(e) {
+                alert("❌ Error syncing balances: " + e.message);
+            }
         }
     </script>
     </div>

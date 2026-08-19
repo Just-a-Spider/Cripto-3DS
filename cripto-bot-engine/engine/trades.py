@@ -37,6 +37,24 @@ async def fetch_binance_cost_basis(client, pair: str, current_qty: float) -> flo
         logger.error(f"Error fetching Binance trades for {pair}: {e}")
     return 0.0
 
+async def sync_binance_balances():
+    if state.binance_client:
+        try:
+            account = await state.binance_client.get_account()
+            new_portfolio = {}
+            for asset in account.get("balances", []):
+                free_val = float(asset.get("free", 0.0))
+                locked_val = float(asset.get("locked", 0.0))
+                total_val = free_val + locked_val
+                if total_val > 0:
+                    new_portfolio[asset["asset"]] = total_val
+                if asset["asset"] == "USDT":
+                    state.usdt_balance = total_val
+            state.portfolio_balances = new_portfolio
+            logger.info(f"Synced live Binance account balances: USDT=${state.usdt_balance:.2f}")
+        except Exception as e:
+            logger.warning(f"Could not sync Binance account balances: {e}")
+
 async def refresh_cost_bases():
     for asset, qty in state.portfolio_balances.items():
         if qty > 0 and asset != "USDT":
@@ -182,6 +200,17 @@ async def decide_trade(approved: bool, override_usdt: float = None):
                 realized_pnl_percent=realized_pnl_percent
             )
             
+            if state.binance_client:
+                await sync_binance_balances()
+            else:
+                asset = trade['pair'].replace("USDT", "")
+                if trade['action'] == 'BUY':
+                    state.usdt_balance = max(0.0, state.usdt_balance - adj_usdt)
+                    state.portfolio_balances[asset] = state.portfolio_balances.get(asset, 0.0) + adj_qty
+                else:
+                    state.usdt_balance += adj_usdt
+                    state.portfolio_balances[asset] = max(0.0, state.portfolio_balances.get(asset, 0.0) - adj_qty)
+
             asyncio.create_task(refresh_cost_bases())
             await broadcast_state()
             return {
@@ -197,3 +226,96 @@ async def decide_trade(approved: bool, override_usdt: float = None):
             await broadcast_state()
             return {"status": "rejected", "trade": trade}
     return {"status": "no_pending_trade"}
+
+
+async def execute_manual_sell(asset: str, percent: float, pin: str) -> Dict[str, Any]:
+    asset = asset.upper().strip()
+    if asset == "USDT":
+        return {"status": "error", "message": "Cannot sell USDT for USDT."}
+
+    if pin != state.auth_pin:
+        return {"status": "error", "message": "Invalid PIN code."}
+
+    total_qty = state.portfolio_balances.get(asset, 0.0)
+    if total_qty <= 0:
+        return {"status": "error", "message": f"No {asset} balance available in portfolio."}
+
+    percent = max(1.0, min(100.0, float(percent)))
+    raw_qty = total_qty * (percent / 100.0)
+
+    pair = f"{asset}USDT"
+    curr_price = state.prices.get(pair, 0.0)
+    if curr_price <= 0 and state.binance_client:
+        try:
+            ticker = await state.binance_client.get_symbol_ticker(symbol=pair)
+            curr_price = float(ticker.get("price", 0.0))
+        except Exception as e:
+            logger.warning(f"Could not fetch ticker for {pair}: {e}")
+
+    if curr_price <= 0:
+        return {"status": "error", "message": f"Unable to determine current price for {pair}."}
+
+    # Validate against exchange filters & minNotional
+    ex_valid, adj_qty, adj_usdt, ex_reason = format_and_validate_order(
+        pair, "SELL", raw_qty * curr_price, curr_price, raw_qty
+    )
+    if not ex_valid:
+        return {"status": "error", "message": ex_reason}
+
+    order_id = "SIMULATED_MANUAL_SELL"
+    if state.binance_client and state.is_active:
+        try:
+            logger.info(f"Executing MANUAL SELL on Binance: {adj_qty} {pair}")
+            order = await state.binance_client.create_order(
+                symbol=pair,
+                side='SELL',
+                type='MARKET',
+                quantity=adj_qty
+            )
+            order_id = str(order.get('orderId', ''))
+            logger.info(f"Manual Binance sell executed: {order_id}")
+        except Exception as e:
+            logger.error(f"Manual Binance sell failed: {e}")
+            return {"status": "error", "message": f"Binance error: {e}"}
+
+    # Calculate realized PnL
+    cost_basis = state.cost_bases.get(pair, 0.0)
+    realized_pnl_usdt = 0.0
+    realized_pnl_percent = 0.0
+    if cost_basis > 0 and curr_price > 0:
+        realized_pnl_usdt = round((curr_price - cost_basis) * adj_qty, 2)
+        realized_pnl_percent = round(((curr_price - cost_basis) / cost_basis) * 100, 2)
+        logger.info(f"Manual sell PnL for {pair}: ${realized_pnl_usdt:+.2f} ({realized_pnl_percent:+.2f}%)")
+
+    await log_trade(
+        pair,
+        "SELL",
+        adj_usdt,
+        curr_price,
+        "EXECUTED",
+        order_id,
+        is_testnet=state.testnet,
+        realized_pnl_usdt=realized_pnl_usdt,
+        realized_pnl_percent=realized_pnl_percent
+    )
+
+    if state.binance_client:
+        await sync_binance_balances()
+    else:
+        # Update local portfolio state in simulated mode
+        state.portfolio_balances[asset] = max(0.0, total_qty - adj_qty)
+        state.usdt_balance += adj_usdt
+
+    asyncio.create_task(refresh_cost_bases())
+    await broadcast_state()
+
+    return {
+        "status": "success",
+        "pair": pair,
+        "sold_qty": adj_qty,
+        "amount_usdt": adj_usdt,
+        "price": curr_price,
+        "order_id": order_id,
+        "realized_pnl_usdt": realized_pnl_usdt,
+        "realized_pnl_percent": realized_pnl_percent
+    }

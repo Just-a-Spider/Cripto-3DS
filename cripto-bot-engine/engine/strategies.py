@@ -167,17 +167,24 @@ class RSIStrategy(BaseStrategy):
                     if qty > 0 and (qty * curr_price) >= 5.0 and avg_price > 0:
                         profit_pct = ((curr_price - avg_price) / avg_price) * 100.0
                         if profit_pct >= self.min_profit_percent:
-                            self.record_signal(pair)
-                            return {
-                                "strategy": self.name,
-                                "action": "SELL",
-                                "pair": pair,
-                                "amount_asset": qty,
-                                "price": curr_price,
-                                "rsi": rsi,
-                                "pct_b": pct_b,
-                                "reason": f"RSI Overbought ({rsi:.1f}) + BB %B ({pct_b:.2f}) + Profit ({profit_pct:.1f}%)"
-                            }
+                            # Trailing Profit Runner: If trailing mode is active, arm the peak and ride the pump
+                            from engine.state import state
+                            if getattr(state, "tpsl_strategy", None) and state.tpsl_strategy.trailing_enabled:
+                                prev_peak = state.tpsl_strategy.peak_prices.get(pair, avg_price)
+                                state.tpsl_strategy.peak_prices[pair] = max(prev_peak, curr_price)
+                                # Let TPSL trailing runner ride the trend instead of static dumping
+                            else:
+                                self.record_signal(pair)
+                                return {
+                                    "strategy": self.name,
+                                    "action": "SELL",
+                                    "pair": pair,
+                                    "amount_asset": qty,
+                                    "price": curr_price,
+                                    "rsi": rsi,
+                                    "pct_b": pct_b,
+                                    "reason": f"RSI Overbought ({rsi:.1f}) + BB %B ({pct_b:.2f}) + Profit ({profit_pct:.1f}%)"
+                                }
         return None
 
 class TPSLStrategy(BaseStrategy):
@@ -189,6 +196,7 @@ class TPSLStrategy(BaseStrategy):
         self.trailing_activation_percent = trailing_activation_percent
         self.trailing_delta_percent = trailing_delta_percent
         self.peak_prices: Dict[str, float] = {}
+        self.custom_trail_deltas: Dict[str, float] = {}
         self.enabled = True
 
     def evaluate_tpsl(self, prices: Dict[str, float], portfolio: Dict[str, float], cost_bases: Dict[str, float], cooldown_hours: float = 0.0) -> Optional[Dict[str, Any]]:
@@ -215,11 +223,13 @@ class TPSLStrategy(BaseStrategy):
                         new_peak = max(prev_peak, curr_price)
                         self.peak_prices[pair] = new_peak
                         
+                        effective_delta = self.custom_trail_deltas.get(pair, self.trailing_delta_percent)
                         pullback_pct = ((new_peak - curr_price) / new_peak) * 100.0
-                        if pullback_pct >= self.trailing_delta_percent:
+                        if pullback_pct >= effective_delta:
                             if not self.is_cooling_down(pair, cooldown_hours):
                                 self.record_signal(pair)
                                 self.peak_prices.pop(pair, None)
+                                self.custom_trail_deltas.pop(pair, None)
                                 return {
                                     "strategy": self.name,
                                     "action": "SELL",
@@ -233,6 +243,7 @@ class TPSLStrategy(BaseStrategy):
                         if not self.is_cooling_down(pair, cooldown_hours):
                             self.record_signal(pair)
                             self.peak_prices.pop(pair, None)
+                            self.custom_trail_deltas.pop(pair, None)
                             return {
                                 "strategy": self.name,
                                 "action": "SELL",

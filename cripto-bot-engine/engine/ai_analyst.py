@@ -397,3 +397,94 @@ Return JSON with exact keys:
         "strategy_recommendation": strategy,
         "pnl_summary": pnl_summary or {}
     }
+
+
+async def evaluate_exit_momentum(
+    pair: str,
+    current_price: float,
+    avg_entry_price: float,
+    rsi: float,
+    pct_b: float,
+    price_history: List[float],
+    api_key: str,
+    model: str = DEFAULT_GEMINI_MODEL
+) -> Dict[str, Any]:
+    """
+    Evaluates whether an overbought profitable position should trail its peak to ride a pump,
+    or exit immediately due to momentum exhaustion.
+    """
+    profit_pct = ((current_price - avg_entry_price) / avg_entry_price) * 100.0 if avg_entry_price > 0 else 0.0
+    if not api_key:
+        return {
+            "verdict": "TRAIL",
+            "trail_delta_percent": 1.5,
+            "momentum_phase": "STANDARD_TRAIL",
+            "summary": "Trailing profit runner active (no API key configured)."
+        }
+
+    fng = await fetch_fear_and_greed_index()
+    fng_val = fng.get("value", 50)
+    fng_class = fng.get("classification", "Neutral")
+
+    hist_str = ""
+    if price_history:
+        recent = price_history[-6:]
+        hist_str = f"Recent 6-candle price trajectory: {['$' + str(round(p, 4)) for p in recent]}."
+
+    prompt = f"""
+Analyze this overbought cryptocurrency position to decide between TRAILING the pump vs SELLING NOW:
+- Pair: {pair}
+- Current Price: ${current_price:,.4f} (Entry: ${avg_entry_price:,.4f}, Current Profit: +{profit_pct:.2f}%)
+- 14-period Wilder RSI: {rsi:.1f}
+- Bollinger Band %B: {pct_b:.2f}
+- Market Macro: Fear & Greed Index is {fng_val}/100 ({fng_class})
+{hist_str}
+
+Return JSON with exact keys:
+{{
+  "verdict": "TRAIL" | "SELL_NOW",
+  "trail_delta_percent": float between 1.0 and 3.0 (e.g. 1.5 for standard, 1.0 for tight trailing, 2.5 for wide explosive trend),
+  "momentum_phase": "PARABOLIC_BREAKOUT" | "EXHAUSTION" | "CHOPPY",
+  "summary": "1 to 2 sentences concise quantitative explanation under 40 words"
+}}
+"""
+    system_inst = "You are a quantitative momentum trading specialist. Evaluate if an overbought asset should trail higher or exit immediately."
+    raw_response = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True)
+
+    if not raw_response:
+        return {
+            "verdict": "TRAIL",
+            "trail_delta_percent": 1.5,
+            "momentum_phase": "DEFAULT_TRAIL",
+            "summary": "Default trailing stop runner active."
+        }
+
+    try:
+        cleaned = raw_response.strip()
+        if cleaned.startswith("```json"): cleaned = cleaned[7:]
+        if cleaned.startswith("```"): cleaned = cleaned[3:]
+        if cleaned.endswith("```"): cleaned = cleaned[:-3]
+        cleaned = cleaned.strip()
+
+        data = json.loads(cleaned)
+        verdict = str(data.get("verdict", "TRAIL")).upper()
+        if verdict not in ["TRAIL", "SELL_NOW"]:
+            verdict = "TRAIL"
+
+        trail_delta = float(data.get("trail_delta_percent", 1.5))
+        trail_delta = max(0.8, min(4.0, trail_delta))
+
+        return {
+            "verdict": verdict,
+            "trail_delta_percent": round(trail_delta, 2),
+            "momentum_phase": str(data.get("momentum_phase", "PARABOLIC_BREAKOUT")),
+            "summary": str(data.get("summary", "Momentum analyzed."))[:300]
+        }
+    except Exception as e:
+        logger.warning(f"Failed to parse exit momentum JSON: {e}")
+        return {
+            "verdict": "TRAIL",
+            "trail_delta_percent": 1.5,
+            "momentum_phase": "FALLBACK_TRAIL",
+            "summary": "Fallback trailing runner engaged."
+        }

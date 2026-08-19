@@ -244,32 +244,40 @@ class DiscordBotService:
             await interaction.followup.send("🚨 Test trade approval card dispatched below.")
 
         @self.tree.command(name="chart", description="Generate a dark-theme candlestick chart with RSI and Bollinger Bands")
-        @app_commands.describe(pair="Trading pair symbol (e.g. BTC, ETH, BTCUSDT)", interval="Candlestick interval (15m, 1h, 2h, 4h, 1d)")
+        @app_commands.describe(pair="Trading pair symbol (e.g. BTC, ETH, XRPUSDT)", interval="Candlestick interval (15m, 1h, 2h, 4h, 6h, 8h, 12h, 1d)")
         @app_commands.choices(interval=[
             app_commands.Choice(name="15 Minutes", value="15m"),
             app_commands.Choice(name="1 Hour", value="1h"),
             app_commands.Choice(name="2 Hours", value="2h"),
             app_commands.Choice(name="4 Hours", value="4h"),
+            app_commands.Choice(name="6 Hours", value="6h"),
+            app_commands.Choice(name="8 Hours", value="8h"),
+            app_commands.Choice(name="12 Hours", value="12h"),
             app_commands.Choice(name="1 Day", value="1d"),
         ])
-        async def cmd_chart(interaction: discord.Interaction, pair: str = "BTCUSDT", interval: app_commands.Choice[str] = None):
+        async def cmd_chart(interaction: discord.Interaction, pair: str = "BTCUSDT", interval: str = "4h"):
             from engine.chart_generator import fetch_klines, generate_candlestick_chart
             await interaction.response.defer()
             clean_pair = pair.upper().strip()
             if not clean_pair.endswith("USDT"):
                 clean_pair += "USDT"
-            interval_val = interval.value if isinstance(interval, app_commands.Choice) else (interval or "1h")
-            klines = await fetch_klines(clean_pair, interval=interval_val, limit=30)
+            
+            valid_intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "8h", "12h", "1d", "3d", "1w", "1M"]
+            interval_str = str(interval).lower().strip() if interval else "4h"
+            if interval_str not in valid_intervals:
+                interval_str = "4h"
+
+            klines = await fetch_klines(clean_pair, interval=interval_str, limit=30)
             if not klines or len(klines) < 5:
-                await interaction.followup.send(f"❌ Could not fetch candlestick data for `{clean_pair}`.")
+                await interaction.followup.send(f"❌ Could not fetch candlestick data for `{clean_pair}` (interval: `{interval_str}`).")
                 return
-            buf = await generate_candlestick_chart(clean_pair, klines, interval=interval_val)
-            file = discord.File(fp=buf, filename=f"{clean_pair}_{interval_val}.png")
+            buf = await generate_candlestick_chart(clean_pair, klines, interval=interval_str)
+            file = discord.File(fp=buf, filename=f"{clean_pair}_{interval_str}.png")
             embed = discord.Embed(
-                title=f"📈 {clean_pair} • {interval_val.upper()} Candlestick Chart",
+                title=f"📈 {clean_pair} • {interval_str.upper()} Candlestick Chart",
                 color=0x8be9fd
             )
-            embed.set_image(url=f"attachment://{clean_pair}_{interval_val}.png")
+            embed.set_image(url=f"attachment://{clean_pair}_{interval_str}.png")
             embed.set_footer(text="Cripto-3DS Engine • Live Market Analytics")
             await interaction.followup.send(embed=embed, file=file)
 

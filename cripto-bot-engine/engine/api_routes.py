@@ -262,3 +262,26 @@ async def force_evaluate_endpoint(x_auth_pin: str = Header(None)):
     state.tpsl_strategy.cooldowns.clear()
     await save_strategy_state()
     return {"status": "cooldowns_cleared"}
+
+from pydantic import BaseModel
+
+class ManualSellRequest(BaseModel):
+    asset: str
+    percent: float = 100.0
+    pin: str
+
+@router.post("/api/trade/manual_sell")
+@router.post("/api/manual_sell")
+async def api_manual_sell(req: ManualSellRequest):
+    from engine.trades import execute_manual_sell
+    res = await execute_manual_sell(req.asset, req.percent, req.pin)
+    if res.get("status") == "error":
+        return JSONResponse(res, status_code=400)
+    return JSONResponse(res)
+
+@router.post("/api/balance/sync", dependencies=[Depends(verify_pin)])
+async def api_sync_balance():
+    from engine.trades import sync_binance_balances
+    await sync_binance_balances()
+    await broadcast_state()
+    return {"status": "ok", "usdt_balance": state.usdt_balance, "portfolio": state.portfolio_balances}
