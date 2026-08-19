@@ -175,6 +175,8 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                     "trade_reason": "",
                     "trade_price": 0.0,
                     "trade_amount_usdt": 0.0,
+                    "ai_risk": "",
+                    "ai_verdict": "",
                     "top_assets": top_assets_str
                 }
                 
@@ -188,6 +190,8 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                     payload["trade_reason"] = reason[:10]
                     payload["trade_price"] = round(state.pending_trade.get("price", 0.0), 2)
                     payload["trade_amount_usdt"] = round(state.pending_trade.get("amount_usdt", 0.0), 2)
+                    payload["ai_risk"] = state.pending_trade.get("ai_risk", "")
+                    payload["ai_verdict"] = state.pending_trade.get("ai_verdict", "")
 
                 msg = json.dumps(payload) + "\n"
                 writer.write(msg.encode('utf-8'))

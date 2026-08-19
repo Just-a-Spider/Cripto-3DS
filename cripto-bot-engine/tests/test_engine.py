@@ -355,3 +355,107 @@ async def test_clear_trade_history():
         resp = await client.delete("/api/trades/clear?only_rejected=true", headers={"X-Auth-PIN": state.auth_pin})
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
+
+@pytest.mark.asyncio
+async def test_fear_and_greed_index():
+    from engine.ai_analyst import fetch_fear_and_greed_index
+    fng = await fetch_fear_and_greed_index()
+    assert isinstance(fng, dict)
+    assert "value" in fng
+    assert "classification" in fng
+    assert 0 <= fng["value"] <= 100
+
+@pytest.mark.asyncio
+async def test_structured_ai_risk_parsing(monkeypatch):
+    from engine.ai_analyst import analyze_trade_signal
+    import engine.ai_analyst as ai_mod
+
+    # Mock call_gemini to return a valid JSON string
+    async def mock_call_gemini(*args, **kwargs):
+        return """```json
+{
+  "verdict": "APPROVE",
+  "risk_score": 3,
+  "confidence": 0.9,
+  "suggested_sl_percent": 2.5,
+  "summary": "Strong oversold bounce setup with bullish volume convergence.",
+  "red_flags": []
+}
+```"""
+    monkeypatch.setattr(ai_mod, "call_gemini", mock_call_gemini)
+
+    res = await analyze_trade_signal(
+        pair="BTCUSDT", action="BUY", price=62000.0, rsi=28.0, pct_b=-0.05,
+        reason="RSI Oversold", price_history=[63000, 62500, 62000], api_key="test_key"
+    )
+
+    assert isinstance(res, dict)
+    assert res["verdict"] == "APPROVE"
+    assert res["risk_score"] == 3
+    assert res["suggested_sl_percent"] == 2.5
+    assert "oversold bounce" in res["summary"].lower()
+    assert "fng_index" in res
+
+@pytest.mark.asyncio
+async def test_telemetry_ai_fields():
+    from engine.state import state
+    state.pending_trade = {
+        "id": 12345,
+        "action": "BUY",
+        "pair": "BTCUSDT",
+        "amount_usdt": 50.0,
+        "price": 62000.0,
+        "reason": "RSI Oversold",
+        "ai_risk": "LOW (3/10)",
+        "ai_verdict": "APPROVE"
+    }
+
+    # Verify telemetry payload mapping
+    payload_ai_risk = state.pending_trade.get("ai_risk", "")
+    payload_ai_verdict = state.pending_trade.get("ai_verdict", "")
+    assert payload_ai_risk == "LOW (3/10)"
+    assert payload_ai_verdict == "APPROVE"
+
+    state.pending_trade = None
+
+@pytest.mark.asyncio
+async def test_market_briefing(monkeypatch):
+    from engine.ai_analyst import generate_market_briefing
+    import engine.ai_analyst as ai_mod
+    from engine.notifier import build_briefing_embed
+
+    # 1. Test fallback when no key provided
+    fallback_data = await generate_market_briefing({}, None, api_key="")
+    assert "headline" in fallback_data
+    assert "macro_regime" in fallback_data
+
+    # 2. Test mocked Gemini briefing response
+    async def mock_call_gemini(*args, **kwargs):
+        return """```json
+{
+  "headline": "Bitcoin Consolidates Ahead of Volatility",
+  "macro_regime": "Market in low-volatility compression phase.",
+  "key_levels": "BTC support at $64,200, resistance at $68,500.",
+  "strategy_recommendation": "Maintain standard DCA pacing with tight SL."
+}
+```"""
+    monkeypatch.setattr(ai_mod, "call_gemini", mock_call_gemini)
+
+    mock_state = {
+        "prices": {"BTCUSDT": 65000.0, "ETHUSDT": 3400.0},
+        "indicators": {"BTCUSDT": {"rsi": 48.0, "pct_b": 0.52}},
+        "usdt_balance": 500.0
+    }
+    pnl = {"total_pnl_usdt": 45.20, "win_rate": 80.0, "closed_trades": 5}
+    briefing = await generate_market_briefing(mock_state, pnl, api_key="valid_key")
+
+    assert briefing["headline"] == "Bitcoin Consolidates Ahead of Volatility"
+    assert "BTC support at $64,200" in briefing["key_levels"]
+    assert "low-volatility compression" in briefing["macro_regime"]
+
+    # 3. Test embed construction
+    embed = build_briefing_embed(briefing, "gemini-2.5-flash")
+    assert embed is not None
+    assert "Bitcoin Consolidates" in embed.title
+
+

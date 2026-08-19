@@ -29,6 +29,8 @@ char g_trade_pair[16] = "";
 char g_trade_reason[64] = "";
 float g_trade_price = 0.0f;
 float g_trade_amount_usdt = 0.0f;
+char g_ai_risk[32] = "";
+char g_ai_verdict[16] = "";
 
 float g_price_history[10] = {0};
 int g_history_count = 0;
@@ -147,6 +149,17 @@ static void parse_telemetry(const char* json) {
 
         char *t_amt = strstr(json, "\"trade_amount_usdt\": ");
         if (t_amt) sscanf(t_amt, "\"trade_amount_usdt\": %f", &g_trade_amount_usdt);
+
+        char *t_risk = strstr(json, "\"ai_risk\": \"");
+        if (t_risk) sscanf(t_risk, "\"ai_risk\": \"%31[^\"]\"", g_ai_risk);
+        else strcpy(g_ai_risk, "");
+
+        char *t_verdict = strstr(json, "\"ai_verdict\": \"");
+        if (t_verdict) sscanf(t_verdict, "\"ai_verdict\": \"%15[^\"]\"", g_ai_verdict);
+        else strcpy(g_ai_verdict, "");
+    } else {
+        strcpy(g_ai_risk, "");
+        strcpy(g_ai_verdict, "");
     }
 
     static int call_counter = 0;

@@ -34,6 +34,8 @@ extern char g_trade_pair[16];
 extern char g_trade_reason[64];
 extern float g_trade_price;
 extern float g_trade_amount_usdt;
+extern char g_ai_risk[32];
+extern char g_ai_verdict[16];
 
 extern float g_price_history[10];
 extern int g_history_count;

@@ -142,13 +142,16 @@ $$\%B = \frac{\text{Price} - \text{Lower}}{\text{Upper} - \text{Lower}}$$
 - **`gemini-2.5-flash`** / **`gemini-2.5-flash-lite`** / **`gemini-1.5-flash`**.
 
 ### Operational Capabilities
-1. **Automated Trade Signal Risk Analyst**:
-   - Injected into trade confirmation cards.
-   - Evaluates price action, 14-period RSI, %B, and 24h support levels to assign a concise **Risk Rating** (`LOW` / `MEDIUM` / `HIGH`).
+1. **Structured Trade Risk Intelligence (`analyze_trade_signal`)**:
+   - Injected into Discord trade cards and 3DS TCP telemetry.
+   - Parses price action, 14-period Wilder RSI, Bollinger Bands `%B`, 5-period trajectory, and live **Crypto Fear & Greed Index** (`alternative.me`).
+   - Generates typed JSON output: `verdict` (`APPROVE` / `CAUTION` / `HIGH_RISK`), `risk_score` (1–10), `confidence`, dynamic `suggested_sl_percent`, warning flags, and concise summary.
 2. **Context-Aware Conversational Analyst (`/ask`)**:
-   - Injects live portfolio balances, active watchlist prices, and technical indicators into the system prompt.
-   - Generates structured, professional market outlooks directly in Discord chat.
-3. **Cost**: **100% Free** via Google AI Studio Free Tier (15 RPM / 1,500 requests/day).
+   - Injects live portfolio balances, active watchlist prices, Wilder RSI, Bollinger `%B`, and macro sentiment (Fear & Greed Index) into prompt context.
+   - Generates actionable, formatted quantitative market analyses in Discord chat.
+3. **Hardware Telemetry Streaming (`ai_risk`, `ai_verdict`)**:
+   - Streams AI risk metrics (`LOW`, `MEDIUM`, `HIGH`) and verdicts over TCP port `7343` directly to Nintendo 3DS client.
+4. **Cost**: **100% Free** via Google AI Studio Free Tier (15 RPM / 1,500 requests/day).
 
 ---
 

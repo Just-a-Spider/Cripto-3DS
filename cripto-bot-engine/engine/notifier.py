@@ -1,8 +1,9 @@
 import time
+import datetime
 import asyncio
 import logging
 import aiohttp
-from typing import Optional
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger("CriptoBotEngine")
 
@@ -16,6 +17,35 @@ except ImportError:
     HAS_DISCORD_PY = False
     app_commands = None
     logger.warning("discord.py not installed. Interactive Discord buttons disabled.")
+
+def build_briefing_embed(data: dict, model_name: str) -> Optional[Any]:
+    if not HAS_DISCORD_PY:
+        return None
+    headline = data.get("headline", "Crypto Market Morning Intelligence")
+    fng_str = data.get("fng_str", "50/100 (Neutral)")
+    macro = data.get("macro_regime", "Market consolidating.")
+    levels = data.get("key_levels", "Key levels active.")
+    strategy = data.get("strategy_recommendation", "Maintain risk limits.")
+    pnl = data.get("pnl_summary", {})
+
+    embed = discord.Embed(
+        title=f"🌅 {headline}",
+        color=0xbd93f9,
+        description="**Automated Daily Market Intelligence & Strategy Briefing**"
+    )
+    embed.add_field(name="🧭 Sentiment & Macro", value=f"**Fear & Greed Index:** `{fng_str}`\n{macro}", inline=False)
+    embed.add_field(name="🎯 Key Watchlist Levels", value=levels, inline=False)
+    embed.add_field(name="💡 Tactical Strategy", value=strategy, inline=False)
+
+    if pnl and pnl.get("closed_trades", 0) > 0:
+        pnl_val = pnl.get("total_pnl_usdt", 0.0)
+        win_rate = pnl.get("win_rate", 0.0)
+        closed = pnl.get("closed_trades", 0)
+        pnl_str = f"**Realized PnL:** `${pnl_val:+.2f} USDT` • **Win Rate:** `{win_rate}%` ({closed} trades)"
+        embed.add_field(name="💰 Bot Performance", value=pnl_str, inline=False)
+
+    embed.set_footer(text=f"Model: {model_name} • Google AI Studio • Cripto-3DS Engine")
+    return embed
 
 class TradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
     def __init__(self, trade_id: int, timeout: float = 600):
@@ -263,6 +293,22 @@ class DiscordBotService:
             embed.set_footer(text=f"Model: {state.gemini_model} • Google AI Studio")
             await interaction.followup.send(f"**Q:** *{question}*", embed=embed)
 
+        @self.tree.command(name="briefing", description="Generate live AI morning market & portfolio briefing")
+        async def cmd_briefing(interaction: discord.Interaction):
+            from engine.state import state
+            from engine.db import get_pnl_summary
+            from engine.ai_analyst import generate_market_briefing
+            await interaction.response.defer()
+            pnl = await get_pnl_summary(is_testnet=state.testnet)
+            data = await generate_market_briefing(
+                market_context=state.to_dict(),
+                pnl_summary=pnl,
+                api_key=state.gemini_api_key,
+                model=state.gemini_model
+            )
+            embed = build_briefing_embed(data, state.gemini_model)
+            await interaction.followup.send(embed=embed)
+
         @self.tree.command(name="cleartrades", description="Purge unwanted trade records from database")
         @app_commands.describe(all_trades="Set true to wipe entire ledger, false to only clean rejected/test trades")
         async def cmd_cleartrades(interaction: discord.Interaction, all_trades: bool = False):
@@ -300,6 +346,29 @@ class DiscordBotService:
             except Exception as e:
                 logger.warning(f"Failed to sync slash commands: {e}")
 
+        async def daily_briefing_loop():
+            # Wait for bot gateway readiness
+            await self.ready_event.wait()
+            while True:
+                try:
+                    now_utc = datetime.datetime.now(datetime.timezone.utc)
+                    # 08:00 AM Peru (UTC-5) is 13:00 UTC
+                    target_today = now_utc.replace(hour=13, minute=0, second=0, microsecond=0)
+                    if now_utc >= target_today:
+                        target_next = target_today + datetime.timedelta(days=1)
+                    else:
+                        target_next = target_today
+                    
+                    wait_sec = max(60.0, (target_next - now_utc).total_seconds())
+                    logger.info(f"Daily morning briefing scheduled in {wait_sec/3600:.1f}h (08:00 AM Peru / 13:00 UTC).")
+                    await asyncio.sleep(wait_sec)
+                    await self.broadcast_daily_briefing()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"Error in daily briefing scheduler loop: {e}")
+                    await asyncio.sleep(3600)
+
         async def run_bot():
             try:
                 logger.info(f"Connecting to Discord Gateway (token: {self.token[:8]}...)...")
@@ -314,10 +383,39 @@ class DiscordBotService:
                 self.ready_event.clear()
 
         self.bot_task = asyncio.create_task(run_bot())
+        self.briefing_task = asyncio.create_task(daily_briefing_loop())
+
+    async def broadcast_daily_briefing(self):
+        if not self.is_ready or not self.client:
+            return
+        from engine.state import state
+        from engine.db import get_pnl_summary
+        from engine.ai_analyst import generate_market_briefing
+        try:
+            clean_channel_id = int(self.channel_id)
+            ch = self.client.get_channel(clean_channel_id)
+            if not ch:
+                ch = await self.client.fetch_channel(clean_channel_id)
+            if ch:
+                pnl = await get_pnl_summary(is_testnet=state.testnet)
+                data = await generate_market_briefing(
+                    market_context=state.to_dict(),
+                    pnl_summary=pnl,
+                    api_key=state.gemini_api_key,
+                    model=state.gemini_model
+                )
+                embed = build_briefing_embed(data, state.gemini_model)
+                await ch.send(content="☀️ **Good Morning! Here is your Daily Cripto-3DS Market Briefing:**", embed=embed)
+                logger.info("Daily morning briefing posted to Discord channel.")
+        except Exception as e:
+            logger.error(f"Failed to post daily morning briefing: {e}")
 
     async def stop(self):
         self.ready_event.clear()
         self.is_connecting = False
+        if hasattr(self, "briefing_task") and self.briefing_task:
+            self.briefing_task.cancel()
+            self.briefing_task = None
         if self.client and not self.client.is_closed():
             try:
                 await self.client.close()
@@ -385,7 +483,7 @@ class DiscordBotService:
                 rsi_val = state.rsi_strategy.calculate_rsi(pair)
                 hist = state.rsi_strategy.price_histories.get(pair, [])
                 _, _, _, pct_b = calculate_bollinger_bands(hist, 20, 2.0)
-                ai_note = await analyze_trade_signal(
+                ai_data = await analyze_trade_signal(
                     pair=pair,
                     action=action,
                     price=price,
@@ -396,8 +494,48 @@ class DiscordBotService:
                     api_key=state.gemini_api_key,
                     model=state.gemini_model
                 )
-                if ai_note:
-                    embed.add_field(name="🤖 AI Risk Assessment", value=ai_note, inline=False)
+                if isinstance(ai_data, dict):
+                    verdict = ai_data.get("verdict", "CAUTION")
+                    risk_score = ai_data.get("risk_score", 5)
+                    sl_pct = ai_data.get("suggested_sl_percent", 3.0)
+                    summary = ai_data.get("summary", "")
+                    flags = ai_data.get("red_flags", [])
+                    fng_v = ai_data.get("fng_index", 50)
+                    fng_c = ai_data.get("fng_classification", "Neutral")
+
+                    v_emoji = "🟢" if verdict == "APPROVE" else ("🟡" if verdict == "CAUTION" else "🔴")
+                    risk_label = "LOW" if risk_score <= 3 else ("MEDIUM" if risk_score <= 6 else "HIGH")
+                    
+                    # Dynamically override embed color and title to match AI risk assessment
+                    if verdict == "HIGH_RISK" or risk_score >= 7:
+                        embed.color = discord.Color(0xff5555) # Red
+                        embed.title = f"🚨 HIGH RISK Trade Confirmation: {action} {pair}"
+                    elif verdict == "CAUTION" or risk_score >= 4:
+                        embed.color = discord.Color(0xffb86c) # Amber / Orange
+                        embed.title = f"⚠️ Trade Confirmation (Caution): {action} {pair}"
+                    elif verdict == "APPROVE":
+                        embed.color = discord.Color(0x50fa7b) # Green
+                        embed.title = f"✅ Trade Confirmation: {action} {pair}"
+
+                    trade["ai_verdict"] = verdict
+                    trade["ai_risk"] = f"{risk_label} ({risk_score}/10)"
+                    trade["ai_sl"] = sl_pct
+                    if state.pending_trade:
+                        state.pending_trade["ai_verdict"] = trade["ai_verdict"]
+                        state.pending_trade["ai_risk"] = trade["ai_risk"]
+
+                    lines = [
+                        f"{v_emoji} **Verdict:** `{verdict}` • **Risk:** `{risk_score}/10 ({risk_label})` • **Suggested SL:** `-{sl_pct}%`",
+                        f"📊 **Macro:** Fear & Greed Index `{fng_v}/100 ({fng_c})`",
+                        f"💡 **Analysis:** {summary}"
+                    ]
+                    if flags:
+                        flags_str = ", ".join(f"`{f}`" for f in flags)
+                        lines.append(f"⚠️ **Flags:** {flags_str}")
+
+                    embed.add_field(name="🤖 AI Risk Assessment", value="\n".join(lines), inline=False)
+                elif isinstance(ai_data, str) and ai_data:
+                    embed.add_field(name="🤖 AI Risk Assessment", value=ai_data, inline=False)
 
             embed.set_footer(text="Cripto-3DS Engine • Tap button below to authorize")
 

@@ -381,17 +381,46 @@ static void draw_top_screen(void) {
     
     // Trade Overlay Banner!
     if (g_telemetry_has_trade) {
-        graphics_draw_hud_panel(0, 80, 400, 80, s_colors.amber, s_colors.danger, 0);
+        u32 banner_bg = s_colors.amber;
+        u32 banner_border = s_colors.danger;
+        u32 badge_color = C2D_Color32(180, 0, 0, 255);
+
+        if (strstr(g_ai_verdict, "HIGH_RISK") || strstr(g_ai_risk, "HIGH")) {
+            banner_bg = C2D_Color32(255, 110, 110, 240); // Red alert tint
+            banner_border = s_colors.danger;
+            badge_color = C2D_Color32(160, 0, 0, 255);
+        } else if (strstr(g_ai_verdict, "CAUTION") || strstr(g_ai_risk, "MEDIUM")) {
+            banner_bg = s_colors.amber;
+            banner_border = C2D_Color32(255, 184, 108, 255);
+            badge_color = C2D_Color32(150, 80, 0, 255);
+        } else if (strstr(g_ai_verdict, "APPROVE") || strstr(g_ai_risk, "LOW")) {
+            banner_bg = C2D_Color32(100, 250, 140, 240); // Green safe tint
+            banner_border = s_colors.cyan;
+            badge_color = C2D_Color32(0, 110, 30, 255);
+        }
+
+        graphics_draw_hud_panel(0, 80, 400, 80, banner_bg, banner_border, 0);
         
         char tradeStr[128];
         snprintf(tradeStr, sizeof(tradeStr), "PENDING %s: %s", g_trade_action, g_trade_pair);
-        draw_dynamic_text(&textObj, tradeStr, 20, 93, 0.7f, C2D_Color32(0,0,0,255));
+        draw_dynamic_text(&textObj, tradeStr, 15, 88, 0.65f, C2D_Color32(0,0,0,255));
         
+        // AI Risk Badge
+        if (g_ai_risk[0] != '\0' || g_ai_verdict[0] != '\0') {
+            char aiBadge[64];
+            if (g_ai_risk[0] != '\0') {
+                snprintf(aiBadge, sizeof(aiBadge), "[AI: %s]", g_ai_risk);
+            } else {
+                snprintf(aiBadge, sizeof(aiBadge), "[AI: %s]", g_ai_verdict);
+            }
+            draw_dynamic_text(&textObj, aiBadge, 250, 90, 0.44f, badge_color);
+        }
+
         snprintf(tradeStr, sizeof(tradeStr), "$%.2f USDT @ $%.2f", g_trade_amount_usdt, g_trade_price);
-        draw_dynamic_text(&textObj, tradeStr, 20, 112, 0.55f, C2D_Color32(0,0,0,255));
+        draw_dynamic_text(&textObj, tradeStr, 15, 110, 0.52f, C2D_Color32(0,0,0,255));
         
         snprintf(tradeStr, sizeof(tradeStr), "Reason: %s", g_trade_reason);
-        draw_dynamic_text(&textObj, tradeStr, 20, 132, 0.40f, C2D_Color32(40,40,40,255));
+        draw_dynamic_text(&textObj, tradeStr, 15, 130, 0.38f, C2D_Color32(30,30,30,255));
     }
 }
 
@@ -527,23 +556,46 @@ static void draw_modal(void) {
         draw_chunky_button(BTN_MODAL_CANCEL_X, BTN_MODAL_CANCEL_Y, BTN_MODAL_CANCEL_W, BTN_MODAL_CANCEL_H, s_colors.panelDim, "(B) CANCEL");
     } 
     else if (g_modal_state == MODAL_CONFIRM_APPROVE) {
-        graphics_draw_hud_panel(MODAL_BOX_X, MODAL_BOX_Y, MODAL_BOX_W, MODAL_BOX_H, s_colors.panel, s_colors.cyan, 10);
+        u32 border_col = s_colors.cyan;
+        if (strstr(g_ai_verdict, "HIGH_RISK") || strstr(g_ai_risk, "HIGH")) {
+            border_col = s_colors.danger;
+        } else if (strstr(g_ai_verdict, "CAUTION") || strstr(g_ai_risk, "MEDIUM")) {
+            border_col = s_colors.amber;
+        }
 
-        draw_dynamic_text(&textObj, "CONFIRM TRADE APPROVAL", 25, 48, 0.55f, s_colors.cyan);
+        graphics_draw_hud_panel(MODAL_BOX_X, MODAL_BOX_Y, MODAL_BOX_W, MODAL_BOX_H, s_colors.panel, border_col, 10);
+
+        draw_dynamic_text(&textObj, "CONFIRM TRADE APPROVAL", 25, 45, 0.52f, border_col);
 
         char line1[128];
         snprintf(line1, sizeof(line1), "Execute %s %s?", g_trade_action, g_trade_pair);
-        draw_dynamic_text(&textObj, line1, 25, 75, 0.48f, s_colors.text);
+        draw_dynamic_text(&textObj, line1, 25, 68, 0.46f, s_colors.text);
 
         char line2[128];
         snprintf(line2, sizeof(line2), "$%.2f USDT @ $%.2f", g_trade_amount_usdt, g_trade_price);
-        draw_dynamic_text(&textObj, line2, 25, 95, 0.45f, s_colors.amber);
+        draw_dynamic_text(&textObj, line2, 25, 86, 0.42f, s_colors.amber);
 
         char line3[128];
         snprintf(line3, sizeof(line3), "Reason: %s", g_trade_reason);
-        draw_dynamic_text(&textObj, line3, 25, 115, 0.40f, s_colors.textDim);
+        draw_dynamic_text(&textObj, line3, 25, 104, 0.38f, s_colors.textDim);
 
-        draw_chunky_button(BTN_MODAL_CONFIRM_X, BTN_MODAL_CONFIRM_Y, BTN_MODAL_CONFIRM_W, BTN_MODAL_CONFIRM_H, s_colors.cyan, "(A) APPROVE");
+        if (g_ai_risk[0] != '\0' || g_ai_verdict[0] != '\0') {
+            char aiLine[128];
+            u32 aiCol = s_colors.cyan;
+            if (strstr(g_ai_verdict, "HIGH_RISK") || strstr(g_ai_risk, "HIGH")) {
+                aiCol = s_colors.danger;
+                snprintf(aiLine, sizeof(aiLine), "AI Risk: %s (HIGH RISK)", g_ai_risk);
+            } else if (strstr(g_ai_verdict, "CAUTION")) {
+                aiCol = s_colors.amber;
+                snprintf(aiLine, sizeof(aiLine), "AI Risk: %s (CAUTION)", g_ai_risk);
+            } else {
+                aiCol = s_colors.cyan;
+                snprintf(aiLine, sizeof(aiLine), "AI Risk: %s (OK)", g_ai_risk);
+            }
+            draw_dynamic_text(&textObj, aiLine, 25, 122, 0.38f, aiCol);
+        }
+
+        draw_chunky_button(BTN_MODAL_CONFIRM_X, BTN_MODAL_CONFIRM_Y, BTN_MODAL_CONFIRM_W, BTN_MODAL_CONFIRM_H, border_col, "(A) APPROVE");
         draw_chunky_button(BTN_MODAL_CANCEL_X, BTN_MODAL_CANCEL_Y, BTN_MODAL_CANCEL_W, BTN_MODAL_CANCEL_H, s_colors.panelDim, "(B) CANCEL");
     }
 }
