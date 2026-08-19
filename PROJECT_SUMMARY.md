@@ -229,4 +229,9 @@ uv run pytest -v tests/test_engine.py
 
 ---
 
+## ⚠️ Disclaimer
+This software is an experimental open-source tool created for educational and personal research purposes. Cryptocurrency trading involves substantial financial risk. The authors assume no liability for financial losses.
+
+---
+
 *Cripto-3DS is built with precision, resilience, and clean architecture.*

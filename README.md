@@ -30,3 +30,8 @@ uv run main.py
 - Web Companion: `http://localhost:7344/web`
 - Run Test Suite: `uv run pytest -v tests/test_engine.py` (17/17 tests passing)
 
+---
+
+## ⚠️ Disclaimer
+This software is an experimental open-source tool created for educational and personal research purposes. Cryptocurrency trading involves substantial financial risk. The authors assume no liability for financial losses.
+
