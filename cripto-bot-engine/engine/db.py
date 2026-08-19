@@ -34,6 +34,17 @@ async def init_db():
                 realized_pnl_percent REAL DEFAULT 0.0
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS news_cache (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                asset TEXT NOT NULL,
+                title TEXT NOT NULL,
+                source TEXT NOT NULL,
+                url TEXT NOT NULL,
+                sentiment_tag TEXT NOT NULL,
+                published_at REAL NOT NULL
+            )
+        """)
         await db.commit()
 
         # Schema auto-migration if upgrading existing db
@@ -145,3 +156,20 @@ async def clear_trade_history(only_unexecuted: bool = True, is_testnet: Optional
         cursor = await db.execute(query, tuple(params))
         await db.commit()
         return cursor.rowcount
+
+async def save_news_cache(news_items: List[Dict[str, Any]]):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM news_cache")
+        for item in news_items:
+            await db.execute(
+                "INSERT INTO news_cache (asset, title, source, url, sentiment_tag, published_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (item.get("asset", "MARKET"), item.get("title", ""), item.get("source", ""), item.get("url", ""), item.get("sentiment_tag", "NEUTRAL"), item.get("published_at", 0.0))
+            )
+        await db.commit()
+
+async def get_cached_news(limit: int = 10) -> List[Dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM news_cache ORDER BY id DESC LIMIT ?", (limit,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]

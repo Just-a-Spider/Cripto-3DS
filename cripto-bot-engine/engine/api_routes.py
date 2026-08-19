@@ -111,8 +111,13 @@ async def update_config(cfg: ConfigModel):
         state.gemini_api_key = saved_cfg.get("gemini_api_key", state.gemini_api_key)
         cfg_dict["gemini_api_key"] = state.gemini_api_key
 
-    state.gemini_model = cfg.gemini_model.strip() if cfg.gemini_model else "gemini-2.5-flash"
+    state.gemini_model = cfg.gemini_model.strip() if cfg.gemini_model else "gemini-3.1-flash-lite"
     cfg_dict["gemini_model"] = state.gemini_model
+
+    gemini_search_val = getattr(cfg, "gemini_search_model", None)
+    if gemini_search_val:
+        state.gemini_search_model = gemini_search_val.strip()
+    cfg_dict["gemini_search_model"] = state.gemini_search_model
 
     await save_config_item("risk_config", cfg_dict)
     logger.info(f"Updated engine config (Keys encrypted using Auth PIN).")
@@ -270,11 +275,25 @@ class ManualSellRequest(BaseModel):
     percent: float = 100.0
     pin: str
 
+class ManualBuyRequest(BaseModel):
+    asset: str
+    usdt_amount: float
+    pin: str
+
 @router.post("/api/trade/manual_sell")
 @router.post("/api/manual_sell")
 async def api_manual_sell(req: ManualSellRequest):
     from engine.trades import execute_manual_sell
     res = await execute_manual_sell(req.asset, req.percent, req.pin)
+    if res.get("status") == "error":
+        return JSONResponse(res, status_code=400)
+    return JSONResponse(res)
+
+@router.post("/api/trade/manual_buy")
+@router.post("/api/manual_buy")
+async def api_manual_buy(req: ManualBuyRequest):
+    from engine.trades import execute_manual_buy
+    res = await execute_manual_buy(req.asset, req.usdt_amount, req.pin)
     if res.get("status") == "error":
         return JSONResponse(res, status_code=400)
     return JSONResponse(res)
@@ -285,3 +304,30 @@ async def api_sync_balance():
     await sync_binance_balances()
     await broadcast_state()
     return {"status": "ok", "usdt_balance": state.usdt_balance, "portfolio": state.portfolio_balances}
+
+@router.get("/api/news", dependencies=[Depends(verify_pin)])
+async def get_news_insights():
+    from engine.ai_analyst import summarize_news_insights
+    data = await summarize_news_insights(state.gemini_api_key, state.gemini_model)
+    return JSONResponse(data)
+
+@router.post("/api/test/run", dependencies=[Depends(verify_pin)])
+async def api_run_test_suite():
+    import asyncio, time
+    start = time.time()
+    proc = await asyncio.create_subprocess_exec(
+        ".venv/bin/python3", "-m", "pytest", "tests/test_engine.py", "-k", "not test_api_run_test_suite", "-v",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await proc.communicate()
+    duration = round(time.time() - start, 2)
+    output = stdout.decode() + stderr.decode()
+    passed = output.count("PASSED")
+    return {
+        "status": "success" if proc.returncode == 0 else "error",
+        "exit_code": proc.returncode,
+        "passed": passed,
+        "duration": duration,
+        "log": output
+    }

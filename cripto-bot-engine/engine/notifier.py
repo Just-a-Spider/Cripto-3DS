@@ -317,6 +317,54 @@ class DiscordBotService:
             embed = build_briefing_embed(data, state.gemini_model)
             await interaction.followup.send(embed=embed)
 
+        @self.tree.command(name="news", description="Fetch breaking crypto news catalysts & AI market sentiment digest")
+        async def cmd_news(interaction: discord.Interaction):
+            from engine.state import state
+            from engine.ai_analyst import summarize_news_insights
+            await interaction.response.defer()
+            data = await summarize_news_insights(state.gemini_api_key, state.gemini_model)
+            
+            color = 0x50fa7b if data.get("overall_catalyst") == "BULLISH" else (0xff5555 if data.get("overall_catalyst") == "BEARISH" else 0xf1fa8c)
+            embed = discord.Embed(
+                title=f"📰 Market News Pulse • Sentiment: {data.get('overall_catalyst', 'NEUTRAL')}",
+                color=color
+            )
+            for i, bullet in enumerate(data.get("bullets", []), 1):
+                embed.add_field(name=f"Key Catalyst #{i}", value=bullet, inline=False)
+            
+            headlines = data.get("headlines", [])
+            if headlines:
+                recent_lines = [f"• **[{h.get('asset', 'MARKET')}]** {h.get('title', '')[:80]}... (`{h.get('sentiment_tag', 'NEUTRAL')}`)" for h in headlines[:5]]
+                embed.add_field(name="Recent Headlines", value="\n".join(recent_lines), inline=False)
+            
+            embed.set_footer(text=f"AI Sentiment Engine • Model: {state.gemini_model}")
+            await interaction.followup.send(embed=embed)
+
+        @self.tree.command(name="test", description="Run full unit & integration test suite on server")
+        async def cmd_test(interaction: discord.Interaction):
+            import asyncio, time
+            await interaction.response.defer()
+            start = time.time()
+            proc = await asyncio.create_subprocess_exec(
+                ".venv/bin/python3", "-m", "pytest", "tests/test_engine.py", "-k", "not test_api_run_test_suite", "-v",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await proc.communicate()
+            duration = round(time.time() - start, 2)
+            output = stdout.decode() + stderr.decode()
+            passed = output.count("PASSED")
+            
+            color = 0x50fa7b if proc.returncode == 0 else 0xff5555
+            embed = discord.Embed(
+                title=f"🧪 Test Suite Results: {'PASSED' if proc.returncode == 0 else 'FAILED'}",
+                description=f"Executed **{passed}** tests in **{duration}s** with exit code **{proc.returncode}**.",
+                color=color
+            )
+            embed.add_field(name="Summary", value=f"```\n{output[-600:]}\n```", inline=False)
+            embed.set_footer(text="Cripto-3DS Engine Remote Test Runner")
+            await interaction.followup.send(embed=embed)
+
         @self.tree.command(name="cleartrades", description="Purge unwanted trade records from database")
         @app_commands.describe(all_trades="Set true to wipe entire ledger, false to only clean rejected/test trades")
         async def cmd_cleartrades(interaction: discord.Interaction, all_trades: bool = False):
