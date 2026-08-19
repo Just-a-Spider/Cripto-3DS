@@ -1,0 +1,49 @@
+# =========================================
+# Cripto-3DS Master Git Ignore Rules
+# =========================================
+
+# Python & Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Secret, Credential & Configuration Files
+*.env
+*.env.*
+!*.env.example
+client_pin.txt
+
+# Databases & Runtime Logs
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.log
+engine.log
+bot_data.db
+
+# Nintendo 3DS Build Intermediates (Preserve final .3dsx and .cia release binaries)
+cripto-3ds/build/
+cripto-3ds/*.map
+cripto-3ds/*.lst
+cripto-3ds/*.elf
+cripto-3ds/banner.bin
+cripto-3ds/icon.bin
+
+# OS & Editor Specific Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~

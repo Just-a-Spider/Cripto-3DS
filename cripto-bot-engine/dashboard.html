@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cripto-3DS Bot</title>
+    <style>
+        :root {
+            --bg-color: #1e1e2e;
+            --card-bg: #282a36;
+            --text: #f8f8f2;
+            --accent: #8be9fd;
+            --green: #50fa7b;
+            --red: #ff5555;
+            --yellow: #f1fa8c;
+            --btn-shadow: #191a21;
+        }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-color);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1, h2, h3 { margin-top: 0; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        
+        .card { 
+            background: var(--card-bg); 
+            border-radius: 16px; 
+            padding: 20px; 
+            margin-bottom: 20px; 
+            box-shadow: 0 4px 0 var(--btn-shadow);
+            border: 2px solid var(--btn-shadow);
+        }
+        
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        
+        /* 3DS Chunky Buttons */
+        .btn { 
+            border: 2px solid var(--btn-shadow); 
+            padding: 12px 24px; 
+            border-radius: 12px; 
+            font-weight: 800; 
+            font-size: 1rem;
+            cursor: pointer; 
+            transition: all 0.1s;
+            box-shadow: 0 4px 0 var(--btn-shadow);
+            text-transform: uppercase;
+        }
+        .btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 0 transparent;
+        }
+        .btn-green { background: var(--green); color: #000; }
+        .btn-red { background: var(--red); color: #000; }
+        .btn-yellow { background: var(--yellow); color: #000; }
+        .btn-accent { background: var(--accent); color: #000; }
+
+        /* Badges */
+        .badge { padding: 6px 12px; border-radius: 8px; font-size: 0.9rem; font-weight: 800; border: 2px solid var(--btn-shadow); }
+        .badge-active { background: var(--green); color: #000; }
+        .badge-paused { background: var(--red); color: #000; }
+
+        .price-list { list-style: none; padding: 0; margin: 0; }
+        .price-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 2px dashed var(--btn-shadow); font-size: 1.1rem; }
+        .price-item:last-child { border-bottom: none; }
+        
+        .trade-banner { 
+            background: var(--yellow); 
+            color: #000;
+            border: 4px solid #000; 
+            padding: 20px; 
+            border-radius: 16px; 
+            margin-bottom: 20px;
+            box-shadow: 0 6px 0 #000;
+        }
+
+        /* Settings Modal */
+        #settings-modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 90vh;
+            overflow-y: auto;
+            border: 4px solid var(--btn-shadow);
+            box-shadow: 0 8px 0 var(--btn-shadow);
+        }
+
+        input[type="number"], input[type="text"], input[type="password"], select { 
+            background: var(--bg-color); 
+            border: 2px solid var(--btn-shadow); 
+            color: var(--text); 
+            padding: 10px; 
+            border-radius: 8px; 
+            width: 100%;
+            box-sizing: border-box;
+            font-weight: bold;
+        }
+        
+        label { font-weight: bold; font-size: 0.9rem; margin-bottom: 5px; display: inline-block; }
+
+        .ws-status { font-size: 0.9rem; font-weight: bold; color: var(--green); }
+        
+        .terminal { 
+            background: #000; 
+            border: 4px solid var(--btn-shadow); 
+            border-radius: 12px; 
+            padding: 15px; 
+            height: 200px; 
+            overflow-y: auto; 
+            font-family: 'Courier New', monospace; 
+            font-size: 0.9rem; 
+            color: #50fa7b; 
+        }
+        .log-error { color: #ff5555; }
+        .log-warn { color: #f1fa8c; }
+        
+        .big-number {
+            font-size: 3.5rem;
+            font-weight: 900;
+            color: var(--accent);
+            text-align: center;
+            margin: 10px 0;
+            text-shadow: 3px 3px 0 var(--btn-shadow);
+        }
+        
+        .pair-tag { display: inline-block; background: var(--btn-shadow); color: var(--card-bg); padding: 4px 8px; border-radius: 6px; margin: 2px 4px 2px 0; font-size: 0.85rem; font-weight: bold; }
+        .pair-tag span { cursor: pointer; color: var(--red); margin-left: 5px; font-weight: 900; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1>Cripto-3DS Engine</h1>
+                <span class="ws-status" id="ws-status">● LIVE WS</span> | 
+                <span style="font-weight: bold; color: var(--yellow);" id="mode-text">TESTNET</span>
+            </div>
+            <div>
+                <button class="btn btn-red" onclick="changeClientPin()">🔑 Change PIN</button>
+                <button class="btn btn-accent" onclick="document.getElementById('settings-modal').style.display='flex'">⚙️ Settings</button>
+            </div>
+        </div>
+
+        <div id="trade-container"></div>
+
+        <div class="card" style="text-align: center; padding: 30px;">
+            <div class="grid">
+                <div>
+                    <h2 style="color: var(--text); font-size: 1.2rem;">Total Value</h2>
+                    <div class="big-number" id="total-portfolio-value" style="font-size: 3rem;">$0.00</div>
+                </div>
+                <div>
+                    <h2 style="color: var(--text); font-size: 1.2rem;">Assets Value (Locked)</h2>
+                    <div class="big-number" id="assets-value" style="font-size: 3rem; color: var(--accent);">-$0.00</div>
+                </div>
+                <div>
+                    <h2 style="color: var(--text); font-size: 1.2rem;">USDT Available (Dry Powder)</h2>
+                    <div class="big-number" id="usdt-available" style="font-size: 3rem; color: var(--green);">$0.00</div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; justify-content: center; gap: 15px;">
+                <span id="bot-status" class="badge badge-paused">PAUSED</span>
+                <button class="btn btn-green" onclick="toggleBot(true)">▶ START</button>
+                <button class="btn btn-red" onclick="toggleBot(false)">⏸ PAUSE</button>
+                <button class="btn btn-yellow" onclick="triggerSimulatedTrade()">TEST BUY</button>
+                <button class="btn btn-yellow" onclick="forceEvaluate()">FORCE CHECK</button>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Asset Portfolio</h3>
+                <div class="price-list" id="portfolio-list">Fetching assets...</div>
+            </div>
+            <div class="card">
+                <h3>Live Market Watchlist</h3>
+                <div class="price-list" id="watchlist">Connecting to WebSocket...</div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>System Logs</h3>
+            <div class="terminal" id="terminal-logs">Loading logs...</div>
+        </div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settings-modal">
+        <div class="modal-content">
+            <div class="header">
+                <h2>Configuration & Strategy</h2>
+                <button class="btn btn-red" onclick="document.getElementById('settings-modal').style.display='none'">✖</button>
+            </div>
+            
+            <div class="grid" style="margin-bottom: 20px;">
+                <div>
+                    <label>API Key:</label>
+                    <input type="password" id="api-key" placeholder="Encrypted on save">
+                </div>
+                <div>
+                    <label>Secret Key:</label>
+                    <input type="password" id="secret-key" placeholder="Encrypted on save">
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label>Favorite Pairs (Search & Add):</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="pair-search" list="symbols-list" placeholder="BTCUSDT">
+                    <button class="btn btn-green" onclick="addPair()">Add</button>
+                    <button class="btn btn-red" onclick="clearPairs()">Clear</button>
+                </div>
+                <datalist id="symbols-list"></datalist>
+                <div id="favorite-pairs-display" style="margin-top: 10px;"></div>
+            </div>
+            
+            <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
+            
+            <div class="grid">
+                <div>
+                    <label>Max Trade ($USDT):</label>
+                    <input type="number" id="max-trade" value="50">
+                </div>
+                <div>
+                    <label>Max Daily ($USDT):</label>
+                    <input type="number" id="max-daily" value="200">
+                </div>
+                <div>
+                    <label>Min Reserve ($USDT):</label>
+                    <input type="number" id="min-reserve" value="20">
+                </div>
+                <div>
+                    <label>Auth PIN (For Encryption):</label>
+                    <input type="text" id="auth-pin" value="1234">
+                </div>
+                <div>
+                    <br>
+                    <label><input type="checkbox" id="testnet-mode" checked> Testnet Mode</label><br>
+                    <label><input type="checkbox" id="require-approval" checked> Require Approval</label>
+                </div>
+            </div>
+
+            <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
+            
+            <h3>Passive Strategy Rules</h3>
+            <div class="grid">
+                <div>
+                    <label>DCA Interval (Seconds):</label>
+                    <input type="number" id="dca-interval" value="3600">
+                </div>
+                <div>
+                    <label>RSI Oversold (&lt;30):</label>
+                    <input type="number" id="rsi-threshold" value="30">
+                </div>
+                <div>
+                    <label>RSI Sample Time (Mins):</label>
+                    <input type="number" id="rsi-timeframe" value="60">
+                </div>
+                <div>
+                    <label>RSI History (Periods):</label>
+                    <input type="number" id="rsi-history" value="250">
+                </div>
+                <div>
+                    <label>Signal Cooldown (Hours):</label>
+                    <input type="number" id="signal-cooldown" value="24">
+                </div>
+                <div>
+                    <label>Global Take Profit (%):</label>
+                    <input type="number" id="tp-percent" value="5">
+                </div>
+                <div>
+                    <label>Global Stop Loss (%):</label>
+                    <input type="number" id="sl-percent" value="3">
+                </div>
+                <div style="grid-column: 1 / span 2;">
+                    <label>Discord Webhook URL:</label>
+                    <input type="text" id="discord-webhook" placeholder="https://discord.com/api/webhooks/...">
+                </div>
+            </div>
+            
+            <div style="margin-top: 30px; text-align: center;">
+                <button class="btn btn-green" style="width: 100%;" onclick="saveConfig()">💾 Save All Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.fallbackPin = '1234';
+        function safeGetPin() { 
+            const hash = window.location.hash;
+            if (hash.startsWith('#pin=')) {
+                const pinFromUrl = hash.split('=')[1];
+                window.fallbackPin = pinFromUrl;
+                return pinFromUrl;
+            }
+            try { 
+                const lsPin = localStorage.getItem('auth-pin');
+                return lsPin ? lsPin : window.fallbackPin;
+            } catch(e) { 
+                return window.fallbackPin; 
+            } 
+        }
+        function safeSetPin(pin) { 
+            console.log("SAVE_PIN:" + pin);
+            try { localStorage.setItem('auth-pin', pin); } catch(e) { window.fallbackPin = pin; } 
+        }
+        function updateUI(data) {
+            document.getElementById('mode-text').innerText = data.testnet ? 'TESTNET' : 'REAL';
+            
+            const statusEl = document.getElementById('bot-status');
+            statusEl.innerText = data.is_active ? 'ACTIVE' : 'PAUSED';
+            statusEl.className = 'badge ' + (data.is_active ? 'badge-active' : 'badge-paused');
+            
+            let listHtml = '';
+            for (const pair of data.favorite_pairs) {
+                const price = data.prices[pair];
+                listHtml += `<div class="price-item"><span>${pair}</span><strong>$${price ? price.toLocaleString() : '---'}</strong></div>`;
+            }
+            document.getElementById('watchlist').innerHTML = listHtml || '<div>No favorites set.</div>';
+
+            // Update Portfolio
+            if (data.portfolio) {
+                let totalValue = data.usdt_balance || 0; // Start with raw USDT
+                let portHtml = '';
+                
+                // Show USDT explicitly in the portfolio list
+                if (data.usdt_balance > 0) {
+                    portHtml += `<div class="price-item"><span>USDT</span><strong>$${data.usdt_balance.toFixed(2)}</strong></div>`;
+                }
+
+                let assets = [];
+                for (const [asset, amount] of Object.entries(data.portfolio)) {
+                    if (asset === 'USDT' || amount <= 0) continue;
+                    
+                    let price = data.prices[asset + 'USDT'] || 0;
+                    let val = amount * price;
+                    assets.push({asset, amount, val});
+                    totalValue += val;
+                }
+                
+                // Sort by USD value descending
+                assets.sort((a, b) => b.val - a.val);
+                
+                // Render Top 10
+                assets.slice(0, 10).forEach(a => {
+                    portHtml += `<div class="price-item"><span>${a.asset} <small>(${a.amount})</small></span><strong>$${a.val.toFixed(2)}</strong></div>`;
+                });
+                
+                if (assets.length > 10) {
+                    portHtml += `<div style="text-align:center; font-size: 0.8rem; margin-top:10px; color:var(--accent)">+ ${assets.length - 10} other assets</div>`;
+                }
+
+                let usdt = data.usdt_balance || 0;
+                let assetsValue = totalValue - usdt;
+                
+                document.getElementById('total-portfolio-value').innerText = `$${totalValue.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+                document.getElementById('assets-value').innerText = `$${assetsValue.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+                document.getElementById('usdt-available').innerText = `$${usdt.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+                document.getElementById('portfolio-list').innerHTML = portHtml || '<div>No assets found.</div>';
+            }
+
+            const tradeContainer = document.getElementById('trade-container');
+            if (data.pending_trade) {
+                const t = data.pending_trade;
+                const existingBanner = document.getElementById('trade-banner-' + t.id);
+                if (existingBanner) {
+                    const timerEl = document.getElementById('trade-timer-' + t.id);
+                    if (timerEl) timerEl.innerText = t.timeout_sec;
+                } else {
+                    tradeContainer.innerHTML = `
+                        <div class="trade-banner" id="trade-banner-${t.id}">
+                            <h2 style="margin:0 0 10px 0;">🔔 PENDING TRADE: ${t.action} ${t.pair}</h2>
+                            <p style="margin:0 0 15px 0; font-weight:bold;">Reason: ${t.reason || t.strategy} | Value: $<input type="number" id="override-trade-amount" value="${t.amount_usdt.toFixed(2)}" style="width: 80px; padding: 2px; font-weight: bold; background: #fff; color: #000; border: none; border-radius: 4px; text-align: center;"> USDT</p>
+                            <p style="margin:0 0 15px 0;">Expires in <span id="trade-timer-${t.id}">${t.timeout_sec}</span> seconds...</p>
+                            <button class="btn btn-green" onclick="decideTrade(true)">✔ APPROVE</button>
+                            <button class="btn btn-red" onclick="decideTrade(false)">✖ REJECT</button>
+                        </div>
+                    `;
+                }
+            } else {
+                tradeContainer.innerHTML = '';
+            }
+
+            if (document.getElementById('settings-modal').style.display !== 'flex') {
+                // Sync config inputs
+                document.getElementById('max-trade').value = data.risk_config.max_trade_usdt;
+                document.getElementById('max-daily').value = data.risk_config.max_daily_spend_usdt;
+                document.getElementById('min-reserve').value = data.risk_config.min_usdt_reserve;
+                document.getElementById('require-approval').checked = data.risk_config.require_human_approval;
+                document.getElementById('auth-pin').value = data.risk_config.auth_pin;
+                document.getElementById('testnet-mode').checked = data.testnet;
+                
+                // Sync strategy settings
+                document.getElementById('dca-interval').value = data.strategies.dca_interval;
+                document.getElementById('rsi-threshold').value = data.strategies.rsi_threshold;
+                document.getElementById('tp-percent').value = data.strategies.tp_percent;
+                document.getElementById('sl-percent').value = data.strategies.sl_percent;
+                document.getElementById('rsi-timeframe').value = data.strategies.rsi_timeframe_minutes || 60;
+                document.getElementById('rsi-history').value = data.strategies.rsi_history_length || 250;
+                document.getElementById('signal-cooldown').value = data.strategies.signal_cooldown_hours || 24;
+                document.getElementById('discord-webhook').value = data.discord_webhook_url || "";
+
+                // Update pairs display with tags
+                currentPairs = [...data.favorite_pairs];
+                const display = document.getElementById('favorite-pairs-display');
+                display.innerHTML = currentPairs.map(p => 
+                    `<div class="pair-tag">${p} <span onclick="removePair('${p}')">✖</span></div>`
+                ).join('');
+                
+                // If keys exist, show placeholder indicating they are saved
+                if (data.has_keys && !document.getElementById('api-key').value) {
+                    document.getElementById('api-key').placeholder = "•••••••••••••••• (Saved)";
+                    document.getElementById('secret-key').placeholder = "•••••••••••••••• (Saved)";
+                }
+            }
+            if (data.logs) {
+                const term = document.getElementById('terminal-logs');
+                let html = '';
+                data.logs.forEach(log => {
+                    let cls = '';
+                    if (log.includes('[ERROR]')) cls = 'log-error';
+                    if (log.includes('[WARNING]')) cls = 'log-warn';
+                    html += `<div class="${cls}">${log}</div>`;
+                });
+                const isScrolledToBottom = term.scrollHeight - term.clientHeight <= term.scrollTop + 20;
+                term.innerHTML = html;
+                if (isScrolledToBottom) term.scrollTop = term.scrollHeight;
+            }
+        }
+
+        function showSettings() {
+            document.getElementById('settings-modal').style.display = 'flex';
+            if (document.getElementById('api-key').value === "") {
+                document.getElementById('api-key').placeholder = "•••••••••••••••• (Saved)";
+                document.getElementById('secret-key').placeholder = "•••••••••••••••• (Saved)";
+            }
+        }
+
+        function changeClientPin() {
+            const newPin = prompt("Enter new connection PIN:");
+            if (newPin !== null && newPin !== "") {
+                safeSetPin(newPin.trim());
+                document.getElementById('auth-pin').value = newPin.trim();
+                window.location.hash = "pin=" + newPin.trim();
+                location.reload();
+            }
+        }
+
+        // Connect WebSocket
+        const savedPin = safeGetPin();
+        if (savedPin) {
+            document.getElementById('auth-pin').value = savedPin;
+        }
+        const pin = document.getElementById('auth-pin').value.trim();
+        const wsUrl = 'ws://127.0.0.1:7344/ws?pin=' + pin;
+        const ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            document.getElementById('ws-status').style.color = 'var(--green)';
+            document.getElementById('ws-status').innerText = '● LIVE WS';
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            updateUI(data);
+        };
+
+        ws.onclose = (e) => {
+            document.getElementById('ws-status').style.color = 'var(--red)';
+            document.getElementById('ws-status').innerText = '○ RECONNECTING...';
+            if (e.code === 1008) {
+                const newPin = prompt("Authentication failed. Please enter your PIN:");
+                if (newPin !== null && newPin !== "") {
+                    safeSetPin(newPin.trim());
+                    document.getElementById('auth-pin').value = newPin;
+                    window.location.hash = "pin=" + newPin.trim();
+                }
+            }
+            setTimeout(() => location.reload(), 3000);
+        };
+
+        let currentPairs = [];
+        
+        async function fetchSymbols() {
+            try {
+                const pin = document.getElementById('auth-pin').value.trim();
+                const res = await fetch('http://127.0.0.1:7344/api/symbols', { headers: { 'X-Auth-PIN': pin } });
+                const data = await res.json();
+                const dl = document.getElementById('symbols-list');
+                dl.innerHTML = data.symbols.map(s => `<option value="${s}">`).join('');
+            } catch(e) {}
+        }
+        fetchSymbols();
+
+        function addPair() {
+            const val = document.getElementById('pair-search').value.toUpperCase();
+            if (val && !currentPairs.includes(val)) {
+                currentPairs.push(val);
+                document.getElementById('favorite-pairs-display').innerText = currentPairs.join(', ');
+                document.getElementById('pair-search').value = '';
+            }
+        }
+        function clearPairs() { currentPairs = []; document.getElementById('favorite-pairs-display').innerHTML = ''; }
+        function removePair(pair) {
+            currentPairs = currentPairs.filter(p => p !== pair);
+            document.getElementById('favorite-pairs-display').innerHTML = currentPairs.map(p => 
+                `<div class="pair-tag">${p} <span onclick="removePair('${p}')">✖</span></div>`
+            ).join('');
+        }
+
+
+
+        async function saveConfig() {
+            const body = {
+                max_trade_usdt: parseFloat(document.getElementById('max-trade').value),
+                max_daily_spend_usdt: parseFloat(document.getElementById('max-daily').value),
+                min_usdt_reserve: parseFloat(document.getElementById('min-reserve').value),
+                require_human_approval: document.getElementById('require-approval').checked,
+                auth_pin: document.getElementById('auth-pin').value,
+                api_key: document.getElementById('api-key').value,
+                secret_key: document.getElementById('secret-key').value,
+                favorite_pairs: currentPairs.join(','),
+                testnet: document.getElementById('testnet-mode').checked,
+                dca_interval: parseInt(document.getElementById('dca-interval').value) || 3600,
+                rsi_threshold: parseFloat(document.getElementById('rsi-threshold').value) || 30.0,
+                tp_percent: parseFloat(document.getElementById('tp-percent').value) || 5.0,
+                sl_percent: parseFloat(document.getElementById('sl-percent').value) || 3.0,
+                rsi_timeframe_minutes: parseInt(document.getElementById('rsi-timeframe').value) || 60,
+                rsi_history_length: parseInt(document.getElementById('rsi-history').value) || 250,
+                signal_cooldown_hours: parseFloat(document.getElementById('signal-cooldown').value) || 24.0,
+                discord_webhook_url: document.getElementById('discord-webhook').value
+            };
+            const pin = document.getElementById('auth-pin').value.trim();
+            safeSetPin(pin);
+            const res = await fetch('http://127.0.0.1:7344/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Auth-PIN': pin },
+                body: JSON.stringify(body)
+            });
+            if (res.ok) {
+                document.getElementById('settings-modal').style.display='none';
+                alert("Settings Saved!");
+            } else {
+                alert("Failed to save settings. Check PIN.");
+            }
+        }
+
+        async function toggleBot(active) {
+            const pin = document.getElementById('auth-pin').value.trim();
+            await fetch('http://127.0.0.1:7344/api/bot/toggle?active=' + active, { method: 'POST', headers: { 'X-Auth-PIN': pin } });
+        }
+
+        async function decideTrade(approved) {
+            const pin = document.getElementById('auth-pin').value.trim();
+            const overrideInput = document.getElementById('override-trade-amount');
+            let url = 'http://127.0.0.1:7344/api/trade/decide?approved=' + approved;
+            if (overrideInput && approved) {
+                url += '&override_usdt=' + overrideInput.value;
+            }
+            await fetch(url, { method: 'POST', headers: { 'X-Auth-PIN': pin } });
+        }
+
+        async function triggerSimulatedTrade() {
+            const pin = document.getElementById('auth-pin').value.trim();
+            await fetch('http://127.0.0.1:7344/api/trade/simulate', { method: 'POST', headers: { 'X-Auth-PIN': pin } });
+        }
+
+        async function forceEvaluate() {
+            const pin = document.getElementById('auth-pin').value.trim();
+            await fetch('http://127.0.0.1:7344/api/trade/force', { method: 'POST', headers: { 'X-Auth-PIN': pin } });
+        }
+    </script>
+</body>
+</html>

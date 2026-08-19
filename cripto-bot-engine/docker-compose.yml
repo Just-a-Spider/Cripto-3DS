@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  cripto-engine:
+    build:
+      context: .
+      network: host
+    container_name: cripto-engine
+    ports:
+      - "7344:7344"
+      - "7343:7343"
+    environment:
+      - HEADLESS=true
+    volumes:
+      - ./bot_data.db:/app/bot_data.db
+      - ./config.env:/app/config.env
+      - ./engine:/app/engine
+      - ./main.py:/app/main.py
+    restart: unless-stopped

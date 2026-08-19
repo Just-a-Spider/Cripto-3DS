@@ -1,0 +1,35 @@
+[project]
+name = "cripto-bot-engine"
+version = "0.1.0"
+description = "Binance Crypto Bot & Nintendo 3DS Real-Time Telemetry Engine"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.28.0",
+    "python-binance>=1.0.19",
+    "pydantic>=2.6.0",
+    "cryptography>=42.0.0",
+    "websockets>=12.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "aiosqlite>=0.22.1",
+    "pystray>=0.19.5",
+    "pillow>=12.3.0",
+    "pywebview>=6.2.1",
+    "pyqt6>=6.11.0",
+    "pyqt6-webengine>=6.11.0",
+    "qtpy>=2.4.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]

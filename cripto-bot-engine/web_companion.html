@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cripto-3DS Bot</title>
+    <style>
+        :root {
+            --bg-color: #1e1e2e;
+            --card-bg: #282a36;
+            --text: #f8f8f2;
+            --accent: #8be9fd;
+            --green: #50fa7b;
+            --red: #ff5555;
+            --yellow: #f1fa8c;
+            --btn-shadow: #191a21;
+        }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-color);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1, h2, h3 { margin-top: 0; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        
+        .card { 
+            background: var(--card-bg); 
+            border-radius: 16px; 
+            padding: 20px; 
+            margin-bottom: 20px; 
+            box-shadow: 0 4px 0 var(--btn-shadow);
+            border: 2px solid var(--btn-shadow);
+        }
+        
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        
+        /* 3DS Chunky Buttons */
+        .btn { 
+            border: 2px solid var(--btn-shadow); 
+            padding: 12px 24px; 
+            border-radius: 12px; 
+            font-weight: 800; 
+            font-size: 1rem;
+            cursor: pointer; 
+            transition: all 0.1s;
+            box-shadow: 0 4px 0 var(--btn-shadow);
+            text-transform: uppercase;
+        }
+        .btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 0 0 transparent;
+        }
+        .btn-green { background: var(--green); color: #000; }
+        .btn-red { background: var(--red); color: #000; }
+        .btn-yellow { background: var(--yellow); color: #000; }
+        .btn-accent { background: var(--accent); color: #000; }
+
+        /* Badges */
+        .badge { padding: 6px 12px; border-radius: 8px; font-size: 0.9rem; font-weight: 800; border: 2px solid var(--btn-shadow); }
+        .badge-active { background: var(--green); color: #000; }
+        .badge-paused { background: var(--red); color: #000; }
+
+        .price-list { list-style: none; padding: 0; margin: 0; }
+        .price-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 2px dashed var(--btn-shadow); font-size: 1.1rem; }
+        .price-item:last-child { border-bottom: none; }
+        
+        .trade-banner { 
+            background: var(--yellow); 
+            color: #000;
+            border: 4px solid #000; 
+            padding: 20px; 
+            border-radius: 16px; 
+            margin-bottom: 20px;
+            box-shadow: 0 6px 0 #000;
+        }
+
+        /* Settings Modal */
+        #settings-modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 20px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 90vh;
+            overflow-y: auto;
+            border: 4px solid var(--btn-shadow);
+            box-shadow: 0 8px 0 var(--btn-shadow);
+        }
+
+        input[type="number"], input[type="text"], input[type="password"], select { 
+            background: var(--bg-color); 
+            border: 2px solid var(--btn-shadow); 
+            color: var(--text); 
+            padding: 10px; 
+            border-radius: 8px; 
+            width: 100%;
+            box-sizing: border-box;
+            font-weight: bold;
+        }
+        
+        label { font-weight: bold; font-size: 0.9rem; margin-bottom: 5px; display: inline-block; }
+
+        .ws-status { font-size: 0.9rem; font-weight: bold; color: var(--green); }
+        
+        .terminal { 
+            background: #000; 
+            border: 4px solid var(--btn-shadow); 
+            border-radius: 12px; 
+            padding: 15px; 
+            height: 200px; 
+            overflow-y: auto; 
+            font-family: 'Courier New', monospace; 
+            font-size: 0.9rem; 
+            color: #50fa7b; 
+        }
+        .log-error { color: #ff5555; }
+        .log-warn { color: #f1fa8c; }
+        
+        .big-number {
+            font-size: 3.5rem;
+            font-weight: 900;
+            color: var(--accent);
+            text-align: center;
+            margin: 10px 0;
+            text-shadow: 3px 3px 0 var(--btn-shadow);
+        }
+        
+        .pair-tag { display: inline-block; background: var(--btn-shadow); color: var(--card-bg); padding: 4px 8px; border-radius: 6px; margin: 2px 4px 2px 0; font-size: 0.85rem; font-weight: bold; }
+        .pair-tag span { cursor: pointer; color: var(--red); margin-left: 5px; font-weight: 900; }
+
+        .rsi-pill {
+            font-size: 0.75rem;
+            font-weight: 800;
+            padding: 2px 7px;
+            border-radius: 6px;
+            display: inline-block;
+            letter-spacing: 0.3px;
+        }
+        .rsi-oversold {
+            background: rgba(80, 250, 123, 0.2);
+            color: #50fa7b;
+            border: 1px solid #50fa7b;
+        }
+        .rsi-overbought {
+            background: rgba(255, 85, 85, 0.2);
+            color: #ff5555;
+            border: 1px solid #ff5555;
+        }
+        .rsi-neutral {
+            background: rgba(139, 233, 253, 0.15);
+            color: #8be9fd;
+            border: 1px solid rgba(139, 233, 253, 0.4);
+        }
+        .bb-pill {
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 2px 5px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            color: #f8f8f2;
+            margin-left: 4px;
+        }
+        
+        /* PIN Lock Modal */
+        #pin-modal {
+            display: flex;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: var(--bg-color);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        #pin-modal h1 { color: var(--accent); margin-bottom: 20px; font-size: 3rem; }
+        #pin-input { font-size: 2rem; text-align: center; margin-bottom: 20px; max-width: 300px; padding: 15px; }
+    </style>
+</head>
+<body>
+    <div id="pin-modal">
+        <h1>Cripto-3DS Web</h1>
+        <input type="password" id="pin-input" placeholder="Enter PIN..." onkeypress="if(event.key === 'Enter') submitPin()" autofocus>
+        <button class="btn btn-accent" onclick="submitPin()">Unlock Engine</button>
+        <p id="pin-error" style="color: var(--red); display: none; font-weight: bold; margin-top: 15px;">Invalid PIN!</p>
+    </div>
+    
+    <div class="container" id="main-app" style="display: none;">
+        <div class="header">
+            <div>
+                <h1>Cripto-3DS Engine</h1>
+                <span class="ws-status" id="ws-status">● LIVE WS</span> | 
+                <span style="font-weight: bold; color: var(--yellow);" id="mode-text">TESTNET</span>
+            </div>
+            <div>
+                <button class="btn btn-accent" onclick="document.getElementById('settings-modal').style.display='flex'">⚙️ Settings</button>
+            </div>
+        </div>
+
+        <div id="trade-container"></div>
+
+        <div class="card" style="text-align: center; padding: 30px;">
+            <div class="grid">
+                <div>
+                    <h2 style="color: var(--text); font-size: 1.2rem;">Total Value</h2>
+                    <div class="big-number" id="total-portfolio-value" style="font-size: 3rem;">$0.00</div>
+                </div>
+                <div>
+                    <h2 style="color: var(--text); font-size: 1.2rem;">Assets Value (Locked)</h2>
+                    <div class="big-number" id="assets-value" style="font-size: 3rem; color: var(--accent);">-$0.00</div>
+                </div>
+                <div>
+                    <h2 style="color: var(--text); font-size: 1.2rem;">USDT Available (Dry Powder)</h2>
+                    <div class="big-number" id="usdt-available" style="font-size: 3rem; color: var(--green);">$0.00</div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; justify-content: center; gap: 15px;">
+                <span id="bot-status" class="badge badge-paused">PAUSED</span>
+                <button class="btn btn-green" onclick="toggleBot(true)">▶ START</button>
+                <button class="btn btn-red" onclick="toggleBot(false)">⏸ PAUSE</button>
+                <button class="btn btn-yellow" onclick="triggerSimulatedTrade()">TEST BUY</button>
+                <button class="btn btn-yellow" onclick="forceEvaluate()">FORCE CHECK</button>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h3>Asset Portfolio</h3>
+                <div class="price-list" id="portfolio-list">Fetching assets...</div>
+            </div>
+            <div class="card">
+                <h3>Live Market Watchlist</h3>
+                <div class="price-list" id="watchlist">Connecting to WebSocket...</div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 25px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h3 style="margin:0;">Performance & Trade History</h3>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-red" style="padding: 6px 12px; font-size: 0.85rem;" onclick="clearTrades(true)">🗑️ Clean Rejected</button>
+                    <button class="btn btn-blue" style="padding: 6px 12px; font-size: 0.85rem;" onclick="fetchTrades()">🔄 Refresh</button>
+                </div>
+            </div>
+            
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 20px;">
+                <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; border: 2px solid var(--btn-shadow); text-align: center;">
+                    <small style="color: var(--comment); font-weight: bold;">REALIZED PROFIT (PNL)</small>
+                    <div id="pnl-total" style="font-size: 1.8rem; font-weight: 900; margin-top: 5px; color: var(--green);">$0.00</div>
+                </div>
+                <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; border: 2px solid var(--btn-shadow); text-align: center;">
+                    <small style="color: var(--comment); font-weight: bold;">WIN RATE</small>
+                    <div id="pnl-winrate" style="font-size: 1.8rem; font-weight: 900; margin-top: 5px; color: var(--cyan);">0.0%</div>
+                </div>
+                <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; border: 2px solid var(--btn-shadow); text-align: center;">
+                    <small style="color: var(--comment); font-weight: bold;">CLOSED TRADES</small>
+                    <div id="pnl-closed" style="font-size: 1.8rem; font-weight: 900; margin-top: 5px; color: var(--purple);">0</div>
+                </div>
+            </div>
+
+            <div style="overflow-x: auto; max-height: 260px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.88rem; text-align: left;">
+                    <thead>
+                        <tr style="border-bottom: 2px solid var(--btn-shadow); color: var(--comment);">
+                            <th style="padding: 8px;">Time</th>
+                            <th style="padding: 8px;">Pair</th>
+                            <th style="padding: 8px;">Side</th>
+                            <th style="padding: 8px;">Price</th>
+                            <th style="padding: 8px;">USDT</th>
+                            <th style="padding: 8px;">Realized PnL</th>
+                            <th style="padding: 8px;">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trade-history-table">
+                        <tr><td colspan="7" style="text-align:center; padding: 15px; color: var(--comment);">No trades recorded yet.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>System Logs</h3>
+            <div class="terminal" id="terminal-logs">Loading logs...</div>
+        </div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settings-modal">
+        <div class="modal-content">
+            <div class="header">
+                <h2>Configuration & Strategy</h2>
+                <button class="btn btn-red" onclick="document.getElementById('settings-modal').style.display='none'">✖</button>
+            </div>
+            
+            <div class="grid" style="margin-bottom: 20px;">
+                <div>
+                    <label>API Key:</label>
+                    <input type="password" id="api-key" placeholder="Encrypted on save">
+                </div>
+                <div>
+                    <label>Secret Key:</label>
+                    <input type="password" id="secret-key" placeholder="Encrypted on save">
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label>Favorite Pairs (Search & Add):</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="pair-search" list="symbols-list" placeholder="BTCUSDT">
+                    <button class="btn btn-green" onclick="addPair()">Add</button>
+                    <button class="btn btn-red" onclick="clearPairs()">Clear</button>
+                </div>
+                <datalist id="symbols-list"></datalist>
+                <div id="favorite-pairs-display" style="margin-top: 10px;"></div>
+            </div>
+            
+            <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
+            
+            <div class="grid">
+                <div>
+                    <label>Max Trade ($USDT):</label>
+                    <input type="number" id="max-trade" value="50">
+                </div>
+                <div>
+                    <label>Max Daily ($USDT):</label>
+                    <input type="number" id="max-daily" value="200">
+                </div>
+                <div>
+                    <label>Min Reserve ($USDT):</label>
+                    <input type="number" id="min-reserve" value="20">
+                </div>
+                <div>
+                    <label>Auth PIN (For Encryption):</label>
+                    <input type="text" id="auth-pin" value="1234">
+                </div>
+                <div>
+                    <br>
+                    <label><input type="checkbox" id="testnet-mode" checked> Testnet Mode</label><br>
+                    <label><input type="checkbox" id="require-approval" checked> Require Approval</label>
+                </div>
+            </div>
+
+            <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
+            
+            <h3>Passive Strategy Rules</h3>
+            <div class="grid">
+                <div>
+                    <label>DCA Interval (Seconds):</label>
+                    <input type="number" id="dca-interval" value="3600">
+                </div>
+                <div>
+                    <label>RSI Oversold (&lt;30):</label>
+                    <input type="number" id="rsi-threshold" value="30">
+                </div>
+                <div>
+                    <label>RSI Sample Time (Mins):</label>
+                    <input type="number" id="rsi-timeframe" value="60">
+                </div>
+                <div>
+                    <label>RSI History (Periods):</label>
+                    <input type="number" id="rsi-history" value="250">
+                </div>
+                <div>
+                    <label>Signal Cooldown (Hours):</label>
+                    <input type="number" id="signal-cooldown" value="24">
+                </div>
+                <div>
+                    <label>Global Take Profit (%):</label>
+                    <input type="number" id="tp-percent" value="5">
+                </div>
+                <div>
+                    <label>Global Stop Loss (%):</label>
+                    <input type="number" id="sl-percent" value="3">
+                </div>
+                <div>
+                    <label>Enable Trailing Stop Loss:</label>
+                    <input type="checkbox" id="trailing-enabled" style="width: 22px; height: 22px; margin-top: 8px;" checked>
+                </div>
+                <div>
+                    <label>TSL Activation (% Profit):</label>
+                    <input type="number" id="trailing-activation" value="3.0" step="0.5">
+                </div>
+                <div>
+                    <label>TSL Trail Delta (% Pullback):</label>
+                    <input type="number" id="trailing-delta" value="1.5" step="0.1">
+                </div>
+                <div>
+                    <label>Discord Bot Token (Interactive Buttons):</label>
+                    <input type="password" id="discord-bot-token" placeholder="Bot Token from Discord Portal">
+                </div>
+                <div>
+                    <label>Discord Channel ID:</label>
+                    <input type="text" id="discord-channel-id" placeholder="e.g. 123456789012345678">
+                </div>
+                <div style="grid-column: 1 / span 2;">
+                    <label>Discord Webhook URL (Fallback / Legacy):</label>
+                    <input type="text" id="discord-webhook" placeholder="https://discord.com/api/webhooks/...">
+                </div>
+                <div style="grid-column: 1 / span 2; text-align: center; margin-top: 5px;">
+                    <button type="button" class="btn btn-blue" style="width: 100%;" onclick="testDiscordBot()">🔔 Test Discord Bot Connection</button>
+                </div>
+            </div>
+
+            <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
+
+            <h3>🤖 Google AI Studio (Gemini)</h3>
+            <p style="font-size: 0.85rem; color: var(--comment); margin-bottom: 12px;">Get a free API key at <a href="https://aistudio.google.com" target="_blank" style="color: var(--accent);">aistudio.google.com</a> (100% Free Tier, 0 maintenance cost).</p>
+            <div class="grid">
+                <div>
+                    <label>Google AI Studio API Key:</label>
+                    <input type="password" id="gemini-api-key" placeholder="AIzaSy... (Saved)">
+                </div>
+                <div>
+                    <label>Gemini Model:</label>
+                    <div style="display: flex; gap: 8px;">
+                        <select id="gemini-model" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
+                            <option value="gemini-2.5-flash">gemini-2.5-flash (Recommended)</option>
+                            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (Ultra Fast)</option>
+                            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                        </select>
+                        <button type="button" class="btn btn-blue" onclick="fetchGeminiModels()" style="padding: 6px 10px; font-size: 0.8rem; white-space: nowrap;">🔄 Refetch</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 25px; text-align: center;">
+                <button class="btn btn-green" style="width: 100%; font-size: 1.1rem; padding: 12px;" onclick="saveConfig()">💾 Save All Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateUI(data) {
+            document.getElementById('mode-text').innerText = data.testnet ? 'TESTNET' : 'REAL';
+            
+            const statusEl = document.getElementById('bot-status');
+            statusEl.innerText = data.is_active ? 'ACTIVE' : 'PAUSED';
+            statusEl.className = 'badge ' + (data.is_active ? 'badge-active' : 'badge-paused');
+            
+            let listHtml = '';
+            for (const pair of data.favorite_pairs) {
+                const price = data.prices[pair];
+                const ind = (data.indicators && data.indicators[pair]) || { rsi: 50.0, pct_b: 0.5 };
+                
+                let rsiClass = 'rsi-neutral';
+                if (ind.rsi <= (data.strategies.rsi_threshold || 30)) rsiClass = 'rsi-oversold';
+                else if (ind.rsi >= 70) rsiClass = 'rsi-overbought';
+
+                listHtml += `
+                    <div class="price-item">
+                        <div style="display:flex; align-items:center;">
+                            <span style="font-weight:bold;">${pair}</span>
+                            <span class="rsi-pill ${rsiClass}" style="margin-left:10px;">RSI ${ind.rsi}</span>
+                            <span class="bb-pill">%B ${ind.pct_b}</span>
+                        </div>
+                        <strong>$${price ? price.toLocaleString() : '---'}</strong>
+                    </div>
+                `;
+            }
+            document.getElementById('watchlist').innerHTML = listHtml || '<div>No favorites set.</div>';
+
+            // Update Portfolio
+            if (data.portfolio) {
+                let totalValue = data.usdt_balance || 0; // Start with raw USDT
+                let portHtml = '';
+                
+                // Show USDT explicitly in the portfolio list
+                if (data.usdt_balance > 0) {
+                    portHtml += `<div class="price-item"><span>USDT</span><strong>$${data.usdt_balance.toFixed(2)}</strong></div>`;
+                }
+
+                let assets = [];
+                for (const [asset, amount] of Object.entries(data.portfolio)) {
+                    if (asset === 'USDT' || amount <= 0) continue;
+                    
+                    let price = data.prices[asset + 'USDT'] || 0;
+                    let val = amount * price;
+                    assets.push({asset, amount, val});
+                    totalValue += val;
+                }
+                
+                // Sort by USD value descending
+                assets.sort((a, b) => b.val - a.val);
+                
+                // Render Top 10
+                assets.slice(0, 10).forEach(a => {
+                    portHtml += `<div class="price-item"><span>${a.asset} <small>(${a.amount})</small></span><strong>$${a.val.toFixed(2)}</strong></div>`;
+                });
+                
+                if (assets.length > 10) {
+                    portHtml += `<div style="text-align:center; font-size: 0.8rem; margin-top:10px; color:var(--accent)">+ ${assets.length - 10} other assets</div>`;
+                }
+
+                let usdt = data.usdt_balance || 0;
+                let assetsValue = totalValue - usdt;
+                
+                document.getElementById('total-portfolio-value').innerText = `$${totalValue.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+                document.getElementById('assets-value').innerText = `$${assetsValue.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+                document.getElementById('usdt-available').innerText = `$${usdt.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}`;
+                document.getElementById('portfolio-list').innerHTML = portHtml || '<div>No assets found.</div>';
+            }
+
+            const tradeContainer = document.getElementById('trade-container');
+            const hasPending = !!data.pending_trade;
+            if (lastPendingTradeState && !hasPending) {
+                // Pending trade was just resolved (via Discord, 3DS, or timeout) -> refresh trades table
+                fetchTrades();
+            }
+            lastPendingTradeState = hasPending;
+
+            if (data.pending_trade) {
+                const t = data.pending_trade;
+                const existingBanner = document.getElementById('trade-banner-' + t.id);
+                if (existingBanner) {
+                    const timerEl = document.getElementById('trade-timer-' + t.id);
+                    if (timerEl) timerEl.innerText = t.timeout_sec;
+                } else {
+                    tradeContainer.innerHTML = `
+                        <div class="card" id="trade-banner-${t.id}" style="border-color: var(--accent); box-shadow: 0 0 15px rgba(255,121,198,0.2);">
+                            <h3 style="color: var(--accent);">🚨 ACTION REQUIRED: ${t.action} ${t.pair} 🚨</h3>
+                            <p style="font-size: 1.1rem; margin: 10px 0;">
+                                <strong>Reason:</strong> ${t.reason || t.strategy}<br>
+                                <strong>Price:</strong> $${t.price.toFixed(4)}<br>
+                                <strong>Amount:</strong> $<input type="number" id="override-trade-amount" value="${t.amount_usdt.toFixed(2)}" style="width: 80px; padding: 2px; font-weight: bold; background: #fff; color: #000; border: none; border-radius: 4px; text-align: center;"> USDT
+                            </p>
+                            <p style="font-weight: bold; color: var(--yellow);">Expires in <span id="trade-timer-${t.id}">${t.timeout_sec}</span>s...</p>
+                            <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center;">
+                                <button class="btn btn-green" onclick="decideTrade(true)">✅ APPROVE</button>
+                                <button class="btn btn-red" onclick="decideTrade(false)">❌ REJECT</button>
+                            </div>
+                        </div>
+                    `;
+                }
+            } else {
+                tradeContainer.innerHTML = '';
+            }
+
+            if (document.getElementById('settings-modal').style.display !== 'flex') {
+                // Sync config inputs
+                document.getElementById('max-trade').value = data.risk_config.max_trade_usdt;
+                document.getElementById('max-daily').value = data.risk_config.max_daily_spend_usdt;
+                document.getElementById('min-reserve').value = data.risk_config.min_usdt_reserve;
+                document.getElementById('auth-pin').value = data.risk_config.auth_pin || authPin || "1234";
+                document.getElementById('require-approval').checked = data.risk_config.require_human_approval;
+                document.getElementById('testnet-mode').checked = data.testnet;
+                
+                // Sync strategy settings
+                document.getElementById('dca-interval').value = data.strategies.dca_interval;
+                document.getElementById('rsi-threshold').value = data.strategies.rsi_threshold;
+                document.getElementById('tp-percent').value = data.strategies.tp_percent;
+                document.getElementById('sl-percent').value = data.strategies.sl_percent;
+                document.getElementById('trailing-enabled').checked = data.strategies.trailing_enabled !== false;
+                document.getElementById('trailing-activation').value = data.strategies.trailing_activation_percent || 3.0;
+                document.getElementById('trailing-delta').value = data.strategies.trailing_delta_percent || 1.5;
+                document.getElementById('rsi-timeframe').value = data.strategies.rsi_timeframe_minutes || 60;
+                document.getElementById('rsi-history').value = data.strategies.rsi_history_length || 250;
+                document.getElementById('signal-cooldown').value = data.strategies.signal_cooldown_hours || 24;
+                document.getElementById('discord-webhook').value = data.discord_webhook_url || "";
+                document.getElementById('discord-channel-id').value = data.discord_channel_id || "";
+
+                // Update pairs display with tags
+                currentPairs = [...data.favorite_pairs];
+                const display = document.getElementById('favorite-pairs-display');
+                display.innerHTML = currentPairs.map(p => 
+                    `<div class="pair-tag">${p} <span onclick="removePair('${p}')">✖</span></div>`
+                ).join('');
+                
+                // If keys exist, show placeholder indicating they are saved
+                if (data.has_keys && !document.getElementById('api-key').value) {
+                    document.getElementById('api-key').placeholder = "•••••••••••••••• (Saved)";
+                    document.getElementById('secret-key').placeholder = "•••••••••••••••• (Saved)";
+                }
+                if (data.has_discord_bot && !document.getElementById('discord-bot-token').value) {
+                    document.getElementById('discord-bot-token').placeholder = "•••••••••••••••• (Saved)";
+                }
+                if (data.has_gemini && !document.getElementById('gemini-api-key').value) {
+                    document.getElementById('gemini-api-key').placeholder = "•••••••••••••••• (Saved)";
+                }
+                if (data.available_gemini_models && data.available_gemini_models.length > 0) {
+                    const sel = document.getElementById('gemini-model');
+                    const curVal = data.gemini_model || sel.value || data.available_gemini_models[0];
+                    sel.innerHTML = data.available_gemini_models.map(m => 
+                        `<option value="${m}" ${m === curVal ? 'selected' : ''}>${m}</option>`
+                    ).join('');
+                } else if (data.gemini_model) {
+                    document.getElementById('gemini-model').value = data.gemini_model;
+                }
+            }
+
+            if (data.logs) {
+                const term = document.getElementById('terminal-logs');
+                let html = '';
+                data.logs.forEach(log => {
+                    let cls = '';
+                    if (log.includes('[ERROR]')) cls = 'log-error';
+                    if (log.includes('[WARNING]')) cls = 'log-warn';
+                    html += `<div class="${cls}">${log}</div>`;
+                });
+                
+                const isScrolledToBottom = term.scrollHeight - term.clientHeight <= term.scrollTop + 20;
+                term.innerHTML = html;
+                if (isScrolledToBottom) {
+                    term.scrollTop = term.scrollHeight;
+                }
+            }
+        }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        let authPin = urlParams.get('pin') || localStorage.getItem("cripto_auth_pin") || "";
+        
+        function getHost() {
+            return window.location.host ? window.location.host : '127.0.0.1:7344';
+        }
+        
+        function getApiBase() {
+            return window.location.protocol === 'file:' ? 'http://127.0.0.1:7344' : '';
+        }
+        
+        function getWsUrl() {
+            const host = getHost();
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            let url = window.location.protocol === 'file:' ? 'ws://127.0.0.1:7344/ws' : protocol + '//' + host + '/ws';
+            if (authPin) {
+                url += `?pin=${encodeURIComponent(authPin)}`;
+            }
+            return url;
+        }
+
+        async function submitPin(autoPin = null) {
+            const pinVal = autoPin || document.getElementById('pin-input').value;
+            if (!pinVal) return;
+            authPin = pinVal;
+            try { localStorage.setItem("cripto_auth_pin", authPin); } catch(e) {}
+            
+            try {
+                const res = await fetch(getApiBase() + '/api/state', { headers: { 'X-Auth-PIN': authPin } });
+                if (res.ok) {
+                    document.getElementById('pin-modal').style.display = 'none';
+                    document.getElementById('main-app').style.display = 'block';
+                    initApp();
+                } else {
+                    document.getElementById('pin-error').style.display = 'block';
+                    try { localStorage.removeItem("cripto_auth_pin"); } catch(e) {}
+                    authPin = "";
+                }
+            } catch (e) {
+                console.error("Login Error:", e);
+                alert("Connection failed: " + e.message);
+            }
+        }
+        
+        if (authPin) {
+            submitPin(authPin);
+        }
+
+        function initApp() {
+            if (document.getElementById('api-key').value === "") {
+                document.getElementById('api-key').placeholder = "•••••••••••••••• (Saved)";
+                document.getElementById('secret-key').placeholder = "•••••••••••••••• (Saved)";
+            }
+
+            // Connect WebSocket
+            const wsUrl = getWsUrl();
+            const ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                document.getElementById('ws-status').style.color = 'var(--green)';
+                document.getElementById('ws-status').innerText = '● LIVE WS';
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateUI(data);
+            };
+
+            ws.onclose = () => {
+                document.getElementById('ws-status').style.color = 'var(--red)';
+                document.getElementById('ws-status').innerText = '○ RECONNECTING...';
+                setTimeout(() => location.reload(), 3000);
+            };
+            
+            fetchSymbols();
+            fetchTrades();
+        }
+
+        let lastPendingTradeState = false;
+
+        async function fetchTrades() {
+            try {
+                const res = await fetch(getApiBase() + '/api/trades', { headers: { 'X-Auth-PIN': authPin } });
+                if (!res.ok) return;
+                const data = await res.json();
+                
+                // Update summary
+                if (data.summary) {
+                    const pnl = data.summary.total_pnl_usdt || 0.0;
+                    const pnlEl = document.getElementById('pnl-total');
+                    pnlEl.innerText = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+                    pnlEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+                    
+                    document.getElementById('pnl-winrate').innerText = `${data.summary.win_rate || 0.0}% (${data.summary.wins}W / ${data.summary.losses}L)`;
+                    document.getElementById('pnl-closed').innerText = data.summary.closed_trades || 0;
+                }
+
+                // Update table
+                const tbody = document.getElementById('trade-history-table');
+                if (!data.trades || data.trades.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 15px; color: var(--comment);">No trades recorded yet.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = data.trades.map(t => {
+                    const date = new Date(t.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                    const isBuy = t.action === 'BUY';
+                    const sideClass = isBuy ? 'badge-active' : 'badge-paused';
+                    
+                    let pnlHtml = '---';
+                    if (t.action === 'SELL' && t.status === 'EXECUTED') {
+                        const pnlVal = t.realized_pnl_usdt || 0.0;
+                        const pnlPct = t.realized_pnl_percent || 0.0;
+                        const color = pnlVal >= 0 ? 'var(--green)' : 'var(--red)';
+                        pnlHtml = `<span style="color:${color}; font-weight:bold;">${pnlVal >= 0 ? '+' : ''}$${pnlVal.toFixed(2)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%)</span>`;
+                    }
+
+                    return `
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                            <td style="padding: 8px; color: var(--comment);">${date}</td>
+                            <td style="padding: 8px; font-weight: bold;">${t.pair}</td>
+                            <td style="padding: 8px;"><span class="badge ${sideClass}" style="font-size:0.75rem; padding: 2px 6px;">${t.action}</span></td>
+                            <td style="padding: 8px;">$${t.price ? t.price.toLocaleString() : '---'}</td>
+                            <td style="padding: 8px;">$${t.amount_usdt.toFixed(2)}</td>
+                            <td style="padding: 8px;">${pnlHtml}</td>
+                            <td style="padding: 8px; font-size:0.8rem; color:${t.status === 'EXECUTED' ? 'var(--green)' : 'var(--yellow)'};">${t.status}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch(e) {
+                console.error("Error fetching trades:", e);
+            }
+        }
+
+        let currentPairs = [];
+        
+        async function fetchSymbols() {
+            try {
+                const res = await fetch(getApiBase() + '/api/symbols', { headers: { 'X-Auth-PIN': authPin } });
+                const data = await res.json();
+                const dl = document.getElementById('symbols-list');
+                dl.innerHTML = data.symbols.map(s => `<option value="${s}">`).join('');
+            } catch(e) {}
+        }
+
+        function addPair() {
+            const val = document.getElementById('pair-search').value.toUpperCase();
+            if (val && !currentPairs.includes(val)) {
+                currentPairs.push(val);
+                document.getElementById('favorite-pairs-display').innerText = currentPairs.join(', ');
+                document.getElementById('pair-search').value = '';
+            }
+        }
+        function clearPairs() { currentPairs = []; document.getElementById('favorite-pairs-display').innerHTML = ''; }
+        function removePair(pair) {
+            currentPairs = currentPairs.filter(p => p !== pair);
+            document.getElementById('favorite-pairs-display').innerHTML = currentPairs.map(p => 
+                `<div class="pair-tag">${p} <span onclick="removePair('${p}')">✖</span></div>`
+            ).join('');
+        }
+
+
+
+        async function saveConfig() {
+            const body = {
+                max_trade_usdt: parseFloat(document.getElementById('max-trade').value),
+                max_daily_spend_usdt: parseFloat(document.getElementById('max-daily').value),
+                min_usdt_reserve: parseFloat(document.getElementById('min-reserve').value),
+                require_human_approval: document.getElementById('require-approval').checked,
+                auth_pin: document.getElementById('auth-pin').value,
+                api_key: document.getElementById('api-key').value,
+                secret_key: document.getElementById('secret-key').value,
+                favorite_pairs: currentPairs.join(','),
+                testnet: document.getElementById('testnet-mode').checked,
+                dca_interval: parseInt(document.getElementById('dca-interval').value) || 3600,
+                rsi_threshold: parseFloat(document.getElementById('rsi-threshold').value) || 30.0,
+                tp_percent: parseFloat(document.getElementById('tp-percent').value) || 5.0,
+                sl_percent: parseFloat(document.getElementById('sl-percent').value) || 3.0,
+                trailing_enabled: document.getElementById('trailing-enabled').checked,
+                trailing_activation_percent: parseFloat(document.getElementById('trailing-activation').value) || 3.0,
+                trailing_delta_percent: parseFloat(document.getElementById('trailing-delta').value) || 1.5,
+                rsi_timeframe_minutes: parseInt(document.getElementById('rsi-timeframe').value) || 60,
+                rsi_history_length: parseInt(document.getElementById('rsi-history').value) || 250,
+                signal_cooldown_hours: parseFloat(document.getElementById('signal-cooldown').value) || 24.0,
+                discord_webhook_url: document.getElementById('discord-webhook').value,
+                discord_bot_token: document.getElementById('discord-bot-token').value,
+                discord_channel_id: document.getElementById('discord-channel-id').value,
+                gemini_api_key: document.getElementById('gemini-api-key').value,
+                gemini_model: document.getElementById('gemini-model').value
+            };
+            await fetch(getApiBase() + '/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Auth-PIN': authPin },
+                body: JSON.stringify(body)
+            });
+            document.getElementById('settings-modal').style.display='none';
+            alert("Settings Saved!");
+        }
+
+        async function testDiscordBot() {
+            const token = document.getElementById('discord-bot-token').value;
+            const channel = document.getElementById('discord-channel-id').value;
+            if (token || channel) {
+                const body = {
+                    max_trade_usdt: parseFloat(document.getElementById('max-trade').value),
+                    max_daily_spend_usdt: parseFloat(document.getElementById('max-daily').value),
+                    min_usdt_reserve: parseFloat(document.getElementById('min-reserve').value),
+                    require_human_approval: document.getElementById('require-approval').checked,
+                    auth_pin: document.getElementById('auth-pin').value,
+                    api_key: document.getElementById('api-key').value,
+                    secret_key: document.getElementById('secret-key').value,
+                    favorite_pairs: currentPairs.join(','),
+                    testnet: document.getElementById('testnet-mode').checked,
+                    dca_interval: parseInt(document.getElementById('dca-interval').value) || 3600,
+                    rsi_threshold: parseFloat(document.getElementById('rsi-threshold').value) || 30.0,
+                    tp_percent: parseFloat(document.getElementById('tp-percent').value) || 5.0,
+                    sl_percent: parseFloat(document.getElementById('sl-percent').value) || 3.0,
+                    trailing_enabled: document.getElementById('trailing-enabled').checked,
+                    trailing_activation_percent: parseFloat(document.getElementById('trailing-activation').value) || 3.0,
+                    trailing_delta_percent: parseFloat(document.getElementById('trailing-delta').value) || 1.5,
+                    rsi_timeframe_minutes: parseInt(document.getElementById('rsi-timeframe').value) || 60,
+                    rsi_history_length: parseInt(document.getElementById('rsi-history').value) || 250,
+                    signal_cooldown_hours: parseFloat(document.getElementById('signal-cooldown').value) || 24.0,
+                    discord_webhook_url: document.getElementById('discord-webhook').value,
+                    discord_bot_token: token,
+                    discord_channel_id: channel,
+                    gemini_api_key: document.getElementById('gemini-api-key').value,
+                    gemini_model: document.getElementById('gemini-model').value
+                };
+                await fetch(getApiBase() + '/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Auth-PIN': authPin },
+                    body: JSON.stringify(body)
+                });
+            }
+            try {
+                const res = await fetch(getApiBase() + '/api/discord/test', {
+                    method: 'POST',
+                    headers: { 'X-Auth-PIN': authPin }
+                });
+                const data = await res.json();
+                if (data.status === 'ok') {
+                    alert("✅ SUCCESS: " + data.message);
+                } else {
+                    alert("❌ ERROR: " + data.message);
+                }
+            } catch(e) {
+                alert("❌ Network Error: " + e.message);
+            }
+        }
+
+        async function toggleBot(active) {
+            await fetch(getApiBase() + '/api/bot/toggle?active=' + active, { method: 'POST', headers: { 'X-Auth-PIN': authPin } });
+        }
+
+        async function decideTrade(approved) {
+            const overrideInput = document.getElementById('override-trade-amount');
+            let url = getApiBase() + '/api/trade/decide?approved=' + approved;
+            if (overrideInput && approved) {
+                url += '&override_usdt=' + overrideInput.value;
+            }
+            try {
+                await fetch(url, { method: 'POST', headers: { 'X-Auth-PIN': authPin } });
+                setTimeout(fetchTrades, 400);
+            } catch(e) {
+                console.error(e);
+            }
+        }
+
+        async function triggerSimulatedTrade() {
+            try {
+                await fetch(getApiBase() + '/api/trade/simulate', { method: 'POST', headers: { 'X-Auth-PIN': authPin } });
+            } catch(e) {
+                console.error(e);
+            }
+        }
+
+        async function forceEvaluate() {
+            try {
+                await fetch(getApiBase() + '/api/trade/force', { method: 'POST', headers: { 'X-Auth-PIN': authPin } });
+            } catch(e) {
+                console.error(e);
+            }
+        }
+        
+        async function clearTrades(onlyRejected = true) {
+            const promptText = onlyRejected 
+                ? "Are you sure you want to clean all REJECTED and TIMEOUT test entries from the database?"
+                : "Are you sure you want to completely WIPE all trade records and reset your PnL ledger?";
+            if (!confirm(promptText)) return;
+            try {
+                const res = await fetch(getApiBase() + '/api/trades/clear?only_rejected=' + onlyRejected, {
+                    method: 'DELETE',
+                    headers: { 'X-Auth-PIN': authPin }
+                });
+                const data = await res.json();
+                alert(`🗑️ Cleaned ${data.deleted} trade records.`);
+                await fetchTrades();
+            } catch(e) {
+                alert("❌ Error cleaning trades: " + e.message);
+            }
+        }
+
+        async function fetchGeminiModels() {
+            const key = document.getElementById('gemini-api-key').value;
+            if (key) {
+                // Save first to register key
+                await saveConfig();
+            }
+            try {
+                const res = await fetch(getApiBase() + '/api/gemini/models', { headers: { 'X-Auth-PIN': authPin } });
+                const data = await res.json();
+                if (data.models && data.models.length > 0) {
+                    const sel = document.getElementById('gemini-model');
+                    const cur = sel.value;
+                    sel.innerHTML = data.models.map(m => `<option value="${m}" ${m === cur ? 'selected' : ''}>${m}</option>`).join('');
+                    if (!data.models.includes(cur)) {
+                        sel.value = data.models[0];
+                    }
+                    alert(`✅ Found ${data.models.length} active Gemini models! Selected: ${sel.value}`);
+                } else {
+                    alert("⚠️ No models returned. Check if your API key is valid at aistudio.google.com.");
+                }
+            } catch(e) {
+                alert("❌ Error fetching models: " + e.message);
+            }
+        }
+
+        function showSettings() {
+            document.getElementById('settings-modal').style.display = 'flex';
+        }
+    </script>
+    </div>
+</body>
+</html>
