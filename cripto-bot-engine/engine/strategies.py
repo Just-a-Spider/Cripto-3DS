@@ -95,6 +95,26 @@ def calculate_bollinger_bands(prices: List[float], period: int = 20, num_std: fl
     pct_b = (curr_price - lower) / band_width if band_width > 0 else 0.5
     return sma, upper, lower, pct_b
 
+class MultiTimeframeFilter:
+    """
+    Evaluates multi-timeframe trend confluence across 15m, 1h, and 4h price histories.
+    Prevents buying a short-term oversold dip if macro trend is in a severe crash.
+    """
+    @staticmethod
+    def evaluate_confluence(history: List[float]) -> Tuple[bool, str]:
+        if not history or len(history) < 10:
+            return True, "OK"
+
+        window = history[-15:] if len(history) >= 15 else history
+        peak = max(window)
+        curr = window[-1]
+        if peak > 0:
+            drop_pct = ((peak - curr) / peak) * 100.0
+            if drop_pct > 8.0:
+                return False, f"Severe Macro Drop (-{drop_pct:.1f}% from peak)"
+
+        return True, "OK"
+
 class RSIStrategy(BaseStrategy):
     def __init__(self, oversold_rsi: float = 30.0, overbought_rsi: float = 70.0, timeframe_minutes: int = 60, history_length: int = 250, min_profit_percent: float = 5.0, use_bb_filter: bool = True):
         super().__init__("RSI Indicator Strategy")
@@ -143,6 +163,11 @@ class RSIStrategy(BaseStrategy):
 
                 if rsi <= self.oversold_rsi and can_buy:
                     if not self.is_cooling_down(pair, cooldown_hours):
+                        # Multi-timeframe trend confluence check
+                        confluence_ok, confluence_reason = MultiTimeframeFilter.evaluate_confluence(history)
+                        if not confluence_ok:
+                            continue
+
                         # Falling knife check: if %b is negative and 3 consecutive steep falling candles, wait for stabilization
                         is_falling_knife = False
                         if self.use_bb_filter and len(history) >= 4:

@@ -46,7 +46,8 @@ class ConfigModel(BaseModel):
     discord_bot_token: str = ""
     discord_channel_id: str = ""
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.1-flash-lite"
+    gemini_search_model: str = "gemini-2.5-flash"
 
 class BotState:
     def __init__(self):
@@ -69,7 +70,7 @@ class BotState:
         self.secret_key: str = ""
         self.ws_tasks = []
         self.dca_strategy = DCAStrategy()
-        self.dca_strategy.enabled = True
+        self.dca_strategy.enabled = False
         self.signal_cooldown_hours: float = 24.0
         self.rsi_strategy = RSIStrategy()
         self.rsi_strategy.enabled = True
@@ -80,8 +81,9 @@ class BotState:
         self.discord_bot_token: str = ""
         self.discord_channel_id: str = ""
         self.gemini_api_key: str = ""
-        self.gemini_model: str = "gemini-2.5-flash"
-        self.available_gemini_models: List[str] = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
+        self.gemini_model: str = "gemini-3.1-flash-lite"
+        self.gemini_search_model: str = "gemini-2.5-flash"
+        self.available_gemini_models: List[str] = ["gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
 
     def to_dict(self) -> Dict[str, Any]:
         indicators = {}
@@ -129,6 +131,7 @@ class BotState:
             "has_discord_bot": bool(self.discord_bot_token and self.discord_channel_id),
             "discord_channel_id": self.discord_channel_id,
             "gemini_model": self.gemini_model,
+            "gemini_search_model": self.gemini_search_model,
             "has_gemini": bool(self.gemini_api_key),
             "available_gemini_models": self.available_gemini_models,
             "logs": list(recent_logs)

@@ -37,17 +37,34 @@
         
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
         
-        /* 3DS Chunky Buttons */
+        /* Controls Bar Responsive Layout */
+        .controls-bar {
+            margin-top: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* 3DS Chunky Responsive Buttons */
         .btn { 
             border: 2px solid var(--btn-shadow); 
-            padding: 12px 24px; 
-            border-radius: 12px; 
+            padding: 10px 16px; 
+            border-radius: 10px; 
             font-weight: 800; 
-            font-size: 1rem;
+            font-size: 0.85rem;
             cursor: pointer; 
             transition: all 0.1s;
             box-shadow: 0 4px 0 var(--btn-shadow);
             text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+            flex: 1 1 auto;
+            min-width: 110px;
+            max-width: 180px;
+            text-align: center;
+            box-sizing: border-box;
         }
         .btn:active {
             transform: translateY(4px);
@@ -59,12 +76,21 @@
         .btn-accent { background: var(--accent); color: #000; }
 
         /* Badges */
-        .badge { padding: 6px 12px; border-radius: 8px; font-size: 0.9rem; font-weight: 800; border: 2px solid var(--btn-shadow); }
+        .badge { padding: 8px 14px; border-radius: 8px; font-size: 0.9rem; font-weight: 800; border: 2px solid var(--btn-shadow); white-space: nowrap; }
         .badge-active { background: var(--green); color: #000; }
         .badge-paused { background: var(--red); color: #000; }
 
         .price-list { list-style: none; padding: 0; margin: 0; }
-        .price-item { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 2px dashed var(--btn-shadow); font-size: 1.1rem; }
+        .price-item { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            padding: 8px 0; 
+            border-bottom: 2px dashed var(--btn-shadow); 
+            font-size: 1rem; 
+            min-height: 44px;
+            box-sizing: border-box;
+        }
         .price-item:last-child { border-bottom: none; }
         
         .trade-banner { 
@@ -119,11 +145,13 @@
             border: 4px solid var(--btn-shadow); 
             border-radius: 12px; 
             padding: 15px; 
-            height: 200px; 
-            overflow-y: auto; 
-            font-family: 'Courier New', monospace; 
-            font-size: 0.9rem; 
-            color: #50fa7b; 
+            font-family: monospace; 
+            height: 180px; 
+            overflow-y: scroll; 
+            color: #00ff66;
+            margin-bottom: 20px;
+            font-size: 0.85rem;
+            line-height: 1.4;
         }
         .log-error { color: #ff5555; }
         .log-warn { color: #f1fa8c; }
@@ -141,12 +169,16 @@
         .pair-tag span { cursor: pointer; color: var(--red); margin-left: 5px; font-weight: 900; }
 
         .rsi-pill {
-            font-size: 0.75rem;
+            font-size: 0.72rem;
             font-weight: 800;
-            padding: 2px 7px;
+            padding: 0 6px;
+            height: 22px;
             border-radius: 6px;
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             letter-spacing: 0.3px;
+            white-space: nowrap;
         }
         .rsi-oversold {
             background: rgba(80, 250, 123, 0.2);
@@ -165,12 +197,19 @@
         }
         .bb-pill {
             font-size: 0.72rem;
-            font-weight: 700;
-            padding: 2px 5px;
+            font-weight: 800;
+            padding: 0 6px;
+            height: 22px;
             border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
             background: rgba(255, 255, 255, 0.08);
-            color: #f8f8f2;
-            margin-left: 4px;
+            color: var(--comment);
+            border: 1px solid var(--btn-shadow);
+            margin-left: 6px;
         }
         
         /* PIN Lock Modal */
@@ -204,7 +243,7 @@
                 <span style="font-weight: bold; color: var(--yellow);" id="mode-text">TESTNET</span>
             </div>
             <div>
-                <button class="btn btn-accent" onclick="document.getElementById('settings-modal').style.display='flex'">⚙️ Settings</button>
+                <button class="btn btn-accent" style="flex:0 0 auto; min-width:auto;" onclick="document.getElementById('settings-modal').style.display='flex'">SETTINGS</button>
             </div>
         </div>
 
@@ -226,13 +265,14 @@
                 </div>
             </div>
             
-            <div style="margin-top: 20px; display: flex; justify-content: center; gap: 15px;">
+            <div class="controls-bar">
                 <span id="bot-status" class="badge badge-paused">PAUSED</span>
-                <button class="btn btn-green" onclick="toggleBot(true)">▶ START</button>
-                <button class="btn btn-red" onclick="toggleBot(false)">⏸ PAUSE</button>
+                <button class="btn btn-green" onclick="toggleBot(true)">START</button>
+                <button class="btn btn-red" onclick="toggleBot(false)">PAUSE</button>
                 <button class="btn btn-yellow" onclick="triggerSimulatedTrade()">TEST BUY</button>
                 <button class="btn btn-yellow" onclick="forceEvaluate()">FORCE CHECK</button>
-                <button class="btn btn-blue" onclick="syncBalances()">🔄 SYNC BALANCES</button>
+                <button class="btn btn-blue" style="background:var(--cyan); color:#000;" onclick="syncBalances()">SYNC BALANCES</button>
+                <button class="btn btn-purple" style="background:#bd93f9; color:#282a36;" onclick="runTestSuite()">RUN TESTS</button>
             </div>
         </div>
 
@@ -248,11 +288,21 @@
         </div>
 
         <div class="card" style="margin-bottom: 25px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                <h3 style="margin:0;">MARKET NEWS PULSE & AI CATALYST INSIGHTS</h3>
+                <button class="btn btn-blue" style="padding: 6px 12px; font-size: 0.85rem; flex:0 0 auto; min-width:auto;" onclick="fetchNewsInsights()">REFRESH NEWS</button>
+            </div>
+            <div id="news-bullets-container" style="font-size: 0.9rem; line-height: 1.5; color: var(--fg); background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px;">
+                Loading breaking news insights...
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 25px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
                 <h3 style="margin:0;">Performance & Trade History</h3>
-                <div style="display: flex; gap: 8px;">
-                    <button class="btn btn-red" style="padding: 6px 12px; font-size: 0.85rem;" onclick="clearTrades(true)">🗑️ Clean Rejected</button>
-                    <button class="btn btn-blue" style="padding: 6px 12px; font-size: 0.85rem;" onclick="fetchTrades()">🔄 Refresh</button>
+                <div style="display: flex; gap: 8px; flex-wrap:wrap;">
+                    <button class="btn btn-red" style="padding: 6px 12px; font-size: 0.85rem; flex:0 0 auto; min-width:auto;" onclick="clearTrades(true)">CLEAN REJECTED</button>
+                    <button class="btn btn-blue" style="padding: 6px 12px; font-size: 0.85rem; flex:0 0 auto; min-width:auto;" onclick="fetchTrades()">REFRESH</button>
                 </div>
             </div>
             
@@ -350,7 +400,54 @@
             </div>
 
             <button id="btn-execute-sell" class="btn btn-red" style="width:100%; padding:12px; font-weight:bold; font-size:1rem;" onclick="submitManualSell()">
-                🔴 EXECUTE MARKET SELL
+                EXECUTE MARKET SELL
+            </button>
+        </div>
+    </div>
+
+    <!-- MANUAL BUY MODAL -->
+    <div id="manual-buy-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1100; justify-content:center; align-items:center;">
+        <div class="modal-content" style="max-width: 420px; padding: 25px;">
+            <div class="header" style="margin-bottom: 15px;">
+                <h2 style="color: var(--green); margin:0;" id="manual-buy-title">Manual Market Buy</h2>
+                <button class="btn btn-red" style="padding: 4px 10px; font-size: 0.85rem;" onclick="closeManualBuyModal()">✖</button>
+            </div>
+            
+            <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 8px; margin-bottom: 15px; border: 1px solid var(--btn-shadow);">
+                <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                    <span style="color:var(--comment);">Target Pair:</span>
+                    <strong id="buy-asset-name" style="color:#fff;">BTCUSDT</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                    <span style="color:var(--comment);">Current Price:</span>
+                    <strong id="buy-current-price" style="color:var(--cyan);">$0.00</strong>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span style="color:var(--comment);">Available USDT (Dry Powder):</span>
+                    <strong id="buy-avail-usdt" style="color:var(--green);">$0.00</strong>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="font-size:0.85rem; color:var(--comment);">USDT Amount to Spend ($5.00 min):</label>
+                <input type="number" id="buy-usdt-input" min="5" value="10" step="1" style="width:100%; margin: 8px 0; font-size: 1.2rem; text-align: center;" oninput="onBuyUsdtChange(this.value)">
+                <div style="display:flex; justify-content:space-between; font-size: 0.9rem;">
+                    <span>Est. Asset Qty: <strong id="buy-est-qty" style="color:var(--green);">0.00</strong></span>
+                    <span>Est. Binance Fee (0.10%): <strong id="buy-est-fee" style="color: var(--yellow);">$0.00</strong></span>
+                </div>
+            </div>
+
+            <div id="buy-min-warning" style="display:none; color:var(--red); font-size:0.85rem; font-weight:bold; margin-bottom:12px; text-align:center;">
+                ⚠️ Minimum Binance order value is $5.00 USDT.
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="font-weight:bold; font-size:0.85rem;">Auth PIN:</label>
+                <input type="password" id="buy-pin-input" placeholder="Enter PIN" style="width:100%; padding:8px; border-radius:6px; border:1px solid var(--btn-shadow); background:rgba(0,0,0,0.3); color:#fff; text-align:center; font-size:1.1rem; letter-spacing:4px;">
+            </div>
+
+            <button id="btn-execute-buy" class="btn btn-green" style="width:100%; padding:12px; font-weight:bold; font-size:1rem;" onclick="submitManualBuy()">
+                EXECUTE MARKET BUY
             </button>
         </div>
     </div>
@@ -468,7 +565,7 @@
                     <input type="text" id="discord-webhook" placeholder="https://discord.com/api/webhooks/...">
                 </div>
                 <div style="grid-column: 1 / span 2; text-align: center; margin-top: 5px;">
-                    <button type="button" class="btn btn-blue" style="width: 100%;" onclick="testDiscordBot()">🔔 Test Discord Bot Connection</button>
+                    <button type="button" class="btn btn-blue" style="width: 100%;" onclick="testDiscordBot()">TEST DISCORD BOT CONNECTION</button>
                 </div>
             </div>
 
@@ -477,26 +574,33 @@
             <h3>🤖 Google AI Studio (Gemini)</h3>
             <p style="font-size: 0.85rem; color: var(--comment); margin-bottom: 12px;">Get a free API key at <a href="https://aistudio.google.com" target="_blank" style="color: var(--accent);">aistudio.google.com</a> (100% Free Tier, 0 maintenance cost).</p>
             <div class="grid">
-                <div>
+                <div style="grid-column: 1 / span 2;">
                     <label>Google AI Studio API Key:</label>
                     <input type="password" id="gemini-api-key" placeholder="AIzaSy... (Saved)">
                 </div>
                 <div>
-                    <label>Gemini Model:</label>
+                    <label>Primary Inference Model:</label>
                     <div style="display: flex; gap: 8px;">
                         <select id="gemini-model" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
-                            <option value="gemini-2.5-flash">gemini-2.5-flash (Recommended)</option>
-                            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (Ultra Fast)</option>
-                            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-                            <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                            <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fastest / Recommended)</option>
+                            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
                         </select>
-                        <button type="button" class="btn btn-blue" onclick="fetchGeminiModels()" style="padding: 6px 10px; font-size: 0.8rem; white-space: nowrap;">🔄 Refetch</button>
+                        <button type="button" class="btn btn-blue" onclick="fetchGeminiModels()" style="padding: 6px 10px; font-size: 0.8rem; white-space: nowrap; flex:0 0 auto; min-width:auto;">REFETCH</button>
                     </div>
+                </div>
+                <div>
+                    <label>Search Grounding Model (Web Search):</label>
+                    <select id="gemini-search-model" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
+                        <option value="gemini-2.5-flash">gemini-2.5-flash (1,500 Free Daily Searches)</option>
+                        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+                    </select>
                 </div>
             </div>
             
             <div style="margin-top: 25px; text-align: center;">
-                <button class="btn btn-green" style="width: 100%; font-size: 1.1rem; padding: 12px;" onclick="saveConfig()">💾 Save All Settings</button>
+                <button class="btn btn-green" style="width: 100%; font-size: 1.1rem; padding: 12px;" onclick="saveConfig()">SAVE ALL SETTINGS</button>
             </div>
         </div>
     </div>
@@ -518,12 +622,15 @@
                 if (ind.rsi <= (data.strategies.rsi_threshold || 30)) rsiClass = 'rsi-oversold';
                 else if (ind.rsi >= 70) rsiClass = 'rsi-overbought';
 
+                const buyBtn = `<button class="btn btn-green" style="padding: 2px 8px; font-size: 0.72rem; margin-left: 8px; flex:0 0 auto; min-width:auto;" onclick="openManualBuyModal('${pair}', ${price})">BUY</button>`;
+
                 listHtml += `
                     <div class="price-item">
                         <div style="display:flex; align-items:center;">
                             <span style="font-weight:bold;">${pair}</span>
                             <span class="rsi-pill ${rsiClass}" style="margin-left:10px;">RSI ${ind.rsi}</span>
                             <span class="bb-pill">%B ${ind.pct_b}</span>
+                            ${buyBtn}
                         </div>
                         <strong>$${price ? price.toLocaleString() : '---'}</strong>
                     </div>
@@ -664,6 +771,10 @@
                     ).join('');
                 } else if (data.gemini_model) {
                     document.getElementById('gemini-model').value = data.gemini_model;
+                }
+                if (data.gemini_search_model) {
+                    const searchSel = document.getElementById('gemini-search-model');
+                    if (searchSel) searchSel.value = data.gemini_search_model;
                 }
             }
 
@@ -873,7 +984,8 @@
                 discord_bot_token: document.getElementById('discord-bot-token').value,
                 discord_channel_id: document.getElementById('discord-channel-id').value,
                 gemini_api_key: document.getElementById('gemini-api-key').value,
-                gemini_model: document.getElementById('gemini-model').value
+                gemini_model: document.getElementById('gemini-model').value,
+                gemini_search_model: document.getElementById('gemini-search-model').value
             };
             await fetch(getApiBase() + '/api/config', {
                 method: 'POST',
@@ -1113,6 +1225,93 @@
             }
         }
 
+        let activeBuyPair = null;
+        let activeBuyPrice = 0.0;
+
+        function openManualBuyModal(pair, price) {
+            activeBuyPair = pair;
+            activeBuyPrice = price || 0.0;
+            const availUsdtText = document.getElementById('usdt-available').innerText.replace('$', '').replace(',', '').trim();
+            const availUsdt = parseFloat(availUsdtText) || 0.0;
+            
+            document.getElementById('buy-asset-name').innerText = pair;
+            document.getElementById('buy-current-price').innerText = `$${activeBuyPrice.toFixed(4)}`;
+            document.getElementById('buy-avail-usdt').innerText = `$${availUsdt.toFixed(2)}`;
+            document.getElementById('buy-pin-input').value = '';
+
+            const defaultUsdt = Math.min(10.0, Math.max(5.0, availUsdt));
+            document.getElementById('buy-usdt-input').value = defaultUsdt.toFixed(2);
+            onBuyUsdtChange(defaultUsdt);
+
+            document.getElementById('manual-buy-modal').style.display = 'flex';
+        }
+
+        function closeManualBuyModal() {
+            document.getElementById('manual-buy-modal').style.display = 'none';
+        }
+
+        function onBuyUsdtChange(usdt) {
+            usdt = parseFloat(usdt) || 0.0;
+            const estQty = activeBuyPrice > 0 ? (usdt / activeBuyPrice) : 0.0;
+            const estFee = usdt * 0.001;
+            document.getElementById('buy-est-qty').innerText = estQty.toFixed(6);
+            document.getElementById('buy-est-fee').innerText = `$${estFee.toFixed(4)}`;
+
+            const warningEl = document.getElementById('buy-min-warning');
+            const submitBtn = document.getElementById('btn-execute-buy');
+            if (usdt < 5.0) {
+                warningEl.style.display = 'block';
+                submitBtn.disabled = true;
+                submitBtn.style.opacity = '0.5';
+            } else {
+                warningEl.style.display = 'none';
+                submitBtn.disabled = false;
+                submitBtn.style.opacity = '1.0';
+            }
+        }
+
+        async function submitManualBuy() {
+            const usdt = parseFloat(document.getElementById('buy-usdt-input').value);
+            const pin = document.getElementById('buy-pin-input').value;
+            if (!pin) {
+                alert("⚠️ Please enter your Auth PIN.");
+                return;
+            }
+            if (usdt < 5.0) {
+                alert("⚠️ Minimum buy order value is $5.00 USDT.");
+                return;
+            }
+            if (!confirm(`Are you sure you want to BUY $${usdt.toFixed(2)} USDT of ${activeBuyPair}?`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(getApiBase() + '/api/manual_buy', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Auth-PIN': pin
+                    },
+                    body: JSON.stringify({
+                        asset: activeBuyPair,
+                        usdt_amount: usdt,
+                        pin: pin
+                    })
+                });
+
+                const data = await res.json();
+                if (res.ok && data.status === 'success') {
+                    alert(`✅ Successfully bought $${data.bought_usdt} USDT of ${data.pair} (${data.bought_qty} units at avg price $${data.price})!`);
+                    closeManualBuyModal();
+                    await syncBalances();
+                } else {
+                    alert(`❌ Buy Failed: ${data.message || 'Unknown error'}`);
+                }
+            } catch(e) {
+                alert(`❌ Network/Server Error: ${e.message}`);
+            }
+        }
+
         async function syncBalances() {
             try {
                 const res = await fetch(getApiBase() + '/api/balance/sync', {
@@ -1125,6 +1324,45 @@
                 alert("❌ Error syncing balances: " + e.message);
             }
         }
+
+        async function fetchNewsInsights() {
+            const el = document.getElementById('news-bullets-container');
+            if (!el) return;
+            try {
+                const res = await fetch(getApiBase() + '/api/news', { headers: { 'X-Auth-PIN': authPin } });
+                const data = await res.json();
+                const bullets = data.bullets || [];
+                const cat = data.overall_catalyst || "NEUTRAL";
+                const catColor = cat === "BULLISH" ? "var(--green)" : (cat === "BEARISH" ? "var(--red)" : "var(--yellow)");
+
+                let html = `<div style="font-weight:bold; margin-bottom:8px; color:${catColor}; font-size:1.05rem;">Overall Catalyst: ${cat}</div>`;
+                html += '<ul style="margin:0; padding-left:20px; line-height:1.6;">' + bullets.map(b => `<li>${b}</li>`).join('') + '</ul>';
+                el.innerHTML = html;
+            } catch(e) {
+                el.innerHTML = '<span style="color:var(--comment);">Could not load news feed.</span>';
+            }
+        }
+
+        async function runTestSuite() {
+            try {
+                alert("🧪 Running full test suite on server... Click OK to execute.");
+                const res = await fetch(getApiBase() + '/api/test/run', {
+                    method: 'POST',
+                    headers: { 'X-Auth-PIN': authPin }
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    alert(`✅ TEST SUITE PASSED!\nExecuted ${data.passed} tests cleanly in ${data.duration}s!`);
+                } else {
+                    alert(`❌ TEST SUITE FAILED (Exit Code ${data.exit_code}):\n${data.log.slice(-300)}`);
+                }
+            } catch(e) {
+                alert("❌ Error running test suite: " + e.message);
+            }
+        }
+
+        // Fetch news on startup
+        setTimeout(fetchNewsInsights, 1500);
     </script>
     </div>
 </body>
