@@ -380,16 +380,23 @@ Return JSON with exact keys:
         }
 
 
-async def summarize_news_insights(api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> Dict[str, Any]:
+async def summarize_news_insights(api_key: str, model: str = DEFAULT_GEMINI_MODEL, target_assets: Optional[List[str]] = None) -> Dict[str, Any]:
     from dataclasses import asdict
     from engine.news_service import news_service
-    cached = await news_service.get_latest_news(["BTC", "ETH", "XRP", "XLM", "DOGE"], force_refresh=True)
+    from engine.state import state
+    
+    if not target_assets:
+        target_assets = [p.replace("USDT", "") for p in getattr(state, "favorite_pairs", ["BTC", "ETH", "SOL", "BNB"])]
+    if not target_assets:
+        target_assets = ["BTC", "ETH", "SOL", "BNB"]
 
-    headline_lines = [f"- [{h.sentiment_tag}] {h.asset}: {h.title} (Source: {h.source})" for h in cached[:8]]
+    cached = await news_service.get_latest_news(target_assets, force_refresh=True)
+
+    headline_lines = [f"- [{h.sentiment_tag}] {h.asset}: {h.title} (Source: {h.source})" for h in cached[:10]]
     headlines_text = "\n".join(headline_lines) if headline_lines else "No breaking items."
 
     prompt = f"""
-Analyze these live cryptocurrency headlines and market events:
+Analyze these live cryptocurrency headlines and market events for {', '.join(target_assets)}:
 {headlines_text}
 
 Synthesize these findings into valid JSON:
@@ -437,7 +444,8 @@ async def ask_gemini(
     model: str = DEFAULT_GEMINI_MODEL
 ) -> str:
     """
-    Answers user market or trading questions with live bot context and macro sentiment.
+    Answers user market or trading questions with complete live bot context, all favorite assets,
+    active portfolio positions, cost bases, unrealized PnL, and macro sentiment.
     """
     if not api_key:
         return "⚠️ Google AI Studio API key not configured. Add your free key in Web Companion Settings to enable AI features."
@@ -445,28 +453,54 @@ async def ask_gemini(
     fng = await fetch_fear_and_greed_index()
     fng_str = f"{fng.get('value', 50)}/100 ({fng.get('classification', 'Neutral')})"
 
-    context_lines = []
     prices = market_context.get("prices", {})
     indicators = market_context.get("indicators", {})
-    for p, pr in list(prices.items())[:6]:
+    fav_pairs = market_context.get("favorite_pairs", list(prices.keys()))
+
+    # Build comprehensive watchlist lines for ALL favorite pairs
+    watchlist_lines = []
+    for p in fav_pairs:
+        pr = prices.get(p, 0.0)
         ind = indicators.get(p, {})
         rsi = ind.get("rsi", "N/A")
         pct_b = ind.get("pct_b", "N/A")
-        context_lines.append(f"{p}: Price=${pr}, RSI={rsi}, %B={pct_b}")
+        watchlist_lines.append(f"- {p}: Price=${pr:,.4f}, RSI={rsi}, %B={pct_b}")
 
-    context_str = "\n".join(context_lines)
+    watchlist_str = "\n".join(watchlist_lines) if watchlist_lines else "No active watchlist pairs."
+
+    # Build active portfolio positions with cost bases & unrealized PnL
+    portfolio = market_context.get("portfolio", {})
+    cost_bases = market_context.get("cost_bases", {})
+    position_lines = []
+    for asset, qty in portfolio.items():
+        if asset != "USDT" and qty > 0:
+            pair = f"{asset}USDT"
+            curr_p = prices.get(pair, 0.0)
+            cost_b = cost_bases.get(pair, 0.0)
+            if curr_p > 0 and (qty * curr_p) >= 1.0:
+                pnl_pct = ((curr_p - cost_b) / cost_b * 100.0) if cost_b > 0 else 0.0
+                pnl_usd = (curr_p - cost_b) * qty if cost_b > 0 else 0.0
+                position_lines.append(f"- {asset}: {qty:.6f} @ Entry ${cost_b:,.4f} | Current ${curr_p:,.4f} | PnL: {pnl_pct:+.2f}% (${pnl_usd:+.2f})")
+
+    positions_str = "\n".join(position_lines) if position_lines else "No open altcoin positions (100% USDT Reserve)."
+
+    strategies = market_context.get("strategies", {})
 
     prompt = f"""
 User Question: {query}
 
 Live Bot Market Context:
 - Crypto Fear & Greed Index: {fng_str}
-- Watchlist Technicals:
-{context_str}
-- USDT Balance: ${market_context.get('usdt_balance', 0.0):.2f}
-- Testnet Mode: {market_context.get('testnet', True)}
+- USDT Balance: ${market_context.get('usdt_balance', 0.0):.2f} (Testnet: {market_context.get('testnet', True)})
+- Active Strategy Config: DCA Enabled: {strategies.get('dca_interval', 'N/A')}s, RSI Oversold: {strategies.get('rsi_threshold', 30.0)}, Bull Dip Threshold: {strategies.get('bull_rsi_threshold', 42.0)}, TP: +{strategies.get('tp_percent', 5.0)}%, Partial TP (50%): {strategies.get('partial_tp_percent', 4.0)}%, SL: -{strategies.get('sl_percent', 3.0)}%
 
-Please answer the user's question clearly, incorporating live technical and macro sentiment context where relevant. Keep response concise, actionable, and formatted nicely in Discord markdown.
+- Current Open Portfolio Positions:
+{positions_str}
+
+- All Favorite Assets Technicals (Live Watchlist):
+{watchlist_str}
+
+Please answer the user's question clearly, incorporating live technicals, open position PnL, and macro sentiment across the entire watchlist where relevant. Keep response concise, actionable, and formatted nicely in Discord markdown.
 """
     system_inst = "You are Cripto-3DS AI Assistant, an expert quantitative cryptocurrency analyst and algorithmic trading assistant."
     result = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, use_google_search=False)
@@ -481,7 +515,7 @@ async def generate_market_briefing(
 ) -> Dict[str, Any]:
     """
     Generates a structured morning market briefing incorporating macro sentiment,
-    watchlist technicals, and bot performance.
+    all watchlist technicals, and bot performance.
     """
     if not api_key:
         return {
@@ -496,14 +530,17 @@ async def generate_market_briefing(
     fng = await fetch_fear_and_greed_index()
     fng_str = f"{fng.get('value', 50)}/100 ({fng.get('classification', 'Neutral')})"
 
-    context_lines = []
     prices = market_context.get("prices", {})
     indicators = market_context.get("indicators", {})
-    for p, pr in list(prices.items())[:6]:
+    fav_pairs = market_context.get("favorite_pairs", list(prices.keys()))
+
+    context_lines = []
+    for p in fav_pairs:
+        pr = prices.get(p, 0.0)
         ind = indicators.get(p, {})
         rsi = ind.get("rsi", "N/A")
         pct_b = ind.get("pct_b", "N/A")
-        context_lines.append(f"{p}: Price=${pr}, Wilder RSI={rsi}, %B={pct_b}")
+        context_lines.append(f"{p}: Price=${pr:,.4f}, Wilder RSI={rsi}, %B={pct_b}")
 
     context_str = "\n".join(context_lines)
 
@@ -514,16 +551,16 @@ async def generate_market_briefing(
     prompt = f"""
 Generate a structured professional cryptocurrency morning market briefing:
 - Crypto Fear & Greed Index: {fng_str}
-- Watchlist Technicals:
+- All Watchlist Technicals:
 {context_str}
 - Bot Account: USDT Balance: ${market_context.get('usdt_balance', 0.0):.2f}, {pnl_info}
 
 Return JSON with exact keys:
 {{
   "headline": "Punchy 1-line morning market outlook under 10 words",
-  "macro_regime": "1-2 sentences on market macro phase and volatility",
-  "key_levels": "Key support and resistance zones for BTC, ETH, and top watchlist assets",
-  "strategy_recommendation": "1-2 sentences actionable trading tactical advice for the day"
+  "macro_regime": "1-2 sentences on market macro phase, bull greed trends, and volatility",
+  "key_levels": "Key support and resistance zones for top watchlist assets",
+  "strategy_recommendation": "1-2 sentences actionable trading tactical advice for dip-buying and partial take-profit"
 }}
 """
     system_inst = "You are a Chief Quantitative Crypto Strategist. Produce structured, highly accurate daily briefing JSON."
@@ -531,8 +568,8 @@ Return JSON with exact keys:
     
     headline = "Crypto Market Morning Intelligence"
     macro = "Market consolidating across key levels."
-    levels = "BTC support at recent lows; monitor RSI momentum."
-    strategy = "Maintain discipline with strict stop losses and DCA pacing."
+    levels = "Support at recent swing lows; monitor RSI momentum."
+    strategy = "Maintain discipline with adaptive dip buying and partial take profit."
 
     if raw_response:
         try:
@@ -557,6 +594,107 @@ Return JSON with exact keys:
         "strategy_recommendation": strategy,
         "pnl_summary": pnl_summary or {}
     }
+
+
+async def scan_market_opportunities(
+    market_context: Dict[str, Any],
+    api_key: str,
+    model: str = DEFAULT_GEMINI_MODEL
+) -> Dict[str, Any]:
+    """
+    Scans all watchlist assets to identify top quantitative setups:
+    1. Bullish Dip-Buy pullbacks (healthy dip in uptrend)
+    2. Partial Take-Profit / Overbought runners
+    3. Momentum Breakouts
+    """
+    if not api_key:
+        return {
+            "market_regime": "NEUTRAL",
+            "fng_str": "N/A",
+            "top_opportunities": [],
+            "tactical_summary": "⚠️ Add Gemini API key to activate real-time AI opportunity scanner."
+        }
+
+    fng = await fetch_fear_and_greed_index()
+    fng_val = fng.get("value", 50)
+    fng_class = fng.get("classification", "Neutral")
+    fng_str = f"{fng_val}/100 ({fng_class})"
+
+    prices = market_context.get("prices", {})
+    indicators = market_context.get("indicators", {})
+    fav_pairs = market_context.get("favorite_pairs", list(prices.keys()))
+    portfolio = market_context.get("portfolio", {})
+    cost_bases = market_context.get("cost_bases", {})
+
+    lines = []
+    for p in fav_pairs:
+        pr = prices.get(p, 0.0)
+        ind = indicators.get(p, {})
+        rsi = ind.get("rsi", 50.0)
+        pct_b = ind.get("pct_b", 0.5)
+        asset = p.replace("USDT", "")
+        qty = portfolio.get(asset, 0.0)
+        cost_b = cost_bases.get(p, 0.0)
+        pos_str = f"Holdings: {qty:.4f} (Entry: ${cost_b:,.4f})" if qty > 0 and cost_b > 0 else "Holdings: None"
+        lines.append(f"- {p}: Price=${pr:,.4f}, RSI={rsi}, %B={pct_b}, {pos_str}")
+
+    watchlist_str = "\n".join(lines)
+
+    prompt = f"""
+Analyze this cryptocurrency watchlist and identify top trading opportunities right now:
+- Market Macro: Fear & Greed Index is {fng_str}
+- Live Watchlist Indicators & Positions:
+{watchlist_str}
+
+Evaluate and rank:
+1. "DIP_BUY": Assets in bull/greed regime undergoing healthy pullbacks (RSI 35-45, %B <= 0.35, bouncing off support).
+2. "TAKE_PROFIT": Assets overextended or reaching resistance (RSI > 65-70, %B > 0.85, profitable positions ready for 50% partial TP).
+3. "MOMENTUM_BREAKOUT": Assets breaking out with high volume/confluence.
+
+Return JSON strictly with format:
+{{
+  "market_regime": "BULLISH_GREED" | "NEUTRAL" | "BEARISH_FEAR",
+  "top_opportunities": [
+    {{
+      "pair": "PAIR_SYMBOL",
+      "setup_type": "DIP_BUY" | "TAKE_PROFIT" | "MOMENTUM_BREAKOUT",
+      "confidence": float between 0.0 and 1.0,
+      "key_levels": "Support: $X, Resistance: $Y",
+      "analysis": "1 to 2 sentences concise quantitative explanation under 35 words"
+    }}
+  ],
+  "tactical_summary": "1 to 2 sentences strategic summary on how to navigate today's market conditions."
+}}
+"""
+    system_inst = "You are a Chief Quantitative Crypto Technical Analyst. Return strictly valid JSON ranking top actionable setups."
+    raw = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True)
+
+    if not raw:
+        return {
+            "market_regime": "BULLISH_GREED" if fng_val >= 55 else ("BEARISH_FEAR" if fng_val <= 40 else "NEUTRAL"),
+            "fng_str": fng_str,
+            "top_opportunities": [],
+            "tactical_summary": "Market consolidating. Monitor RSI pullbacks and trailing stop runners."
+        }
+
+    try:
+        cleaned = raw.strip().replace("```json", "").replace("```", "").strip()
+        data = json.loads(cleaned)
+        opps = data.get("top_opportunities", [])
+        return {
+            "market_regime": data.get("market_regime", "NEUTRAL"),
+            "fng_str": fng_str,
+            "top_opportunities": opps[:5],
+            "tactical_summary": data.get("tactical_summary", "Monitor key support and resistance zones.")
+        }
+    except Exception as e:
+        logger.warning(f"Error parsing opportunities JSON: {e}")
+        return {
+            "market_regime": "NEUTRAL",
+            "fng_str": fng_str,
+            "top_opportunities": [],
+            "tactical_summary": "Market analysis complete. Watch for key support tests."
+        }
 
 
 async def evaluate_exit_momentum(

@@ -39,6 +39,11 @@ class ConfigModel(BaseModel):
     trailing_enabled: bool = True
     trailing_activation_percent: float = 3.0
     trailing_delta_percent: float = 1.5
+    partial_tp_enabled: bool = True
+    partial_tp_percent: float = 4.0
+    partial_tp_ratio: float = 0.5
+    bull_regime_dip_enabled: bool = True
+    bull_rsi_threshold: float = 42.0
     rsi_timeframe_minutes: int = 60
     rsi_history_length: int = 250
     signal_cooldown_hours: float = 24.0
@@ -48,6 +53,9 @@ class ConfigModel(BaseModel):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.1-flash-lite"
     gemini_search_model: str = "gemini-3.5-flash"
+    ai_scout_enabled: bool = True
+    ai_scout_interval_hours: float = 2.0
+    ai_scout_min_confidence: float = 0.85
 
 class BotState:
     def __init__(self):
@@ -84,8 +92,17 @@ class BotState:
         self.gemini_model: str = "gemini-3.1-flash-lite"
         self.gemini_search_model: str = "gemini-3.5-flash"
         self.available_gemini_models: List[str] = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
+        self.ai_scout_enabled: bool = True
+        self.ai_scout_interval_hours: float = 2.0
+        self.ai_scout_min_confidence: float = 0.85
+
+    def sync_favorite_prices(self):
+        for pair in self.favorite_pairs:
+            if pair not in self.prices:
+                self.prices[pair] = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
+        self.sync_favorite_prices()
         indicators = {}
         for pair in self.favorite_pairs:
             rsi_val = round(self.rsi_strategy.calculate_rsi(pair), 1)
@@ -101,6 +118,7 @@ class BotState:
             "testnet": self.testnet,
             "usdt_balance": self.usdt_balance,
             "portfolio": self.portfolio_balances,
+            "cost_bases": self.cost_bases,
             "prices": self.prices,
             "indicators": indicators,
             "favorite_pairs": self.favorite_pairs,
@@ -123,9 +141,19 @@ class BotState:
                 "trailing_enabled": self.tpsl_strategy.trailing_enabled,
                 "trailing_activation_percent": self.tpsl_strategy.trailing_activation_percent,
                 "trailing_delta_percent": self.tpsl_strategy.trailing_delta_percent,
+                "partial_tp_enabled": getattr(self.tpsl_strategy, "partial_tp_enabled", True),
+                "partial_tp_percent": getattr(self.tpsl_strategy, "partial_tp_percent", 4.0),
+                "partial_tp_ratio": getattr(self.tpsl_strategy, "partial_tp_ratio", 0.5),
+                "bull_regime_dip_enabled": getattr(self.rsi_strategy, "bull_regime_dip_enabled", True),
+                "bull_rsi_threshold": getattr(self.rsi_strategy, "bull_rsi_threshold", 42.0),
                 "rsi_timeframe_minutes": self.rsi_strategy.timeframe_minutes,
                 "rsi_history_length": self.rsi_strategy.history_length,
                 "signal_cooldown_hours": self.signal_cooldown_hours
+            },
+            "ai_scout": {
+                "enabled": self.ai_scout_enabled,
+                "interval_hours": self.ai_scout_interval_hours,
+                "min_confidence": self.ai_scout_min_confidence
             },
             "discord_webhook_url": self.discord_webhook_url,
             "has_discord_bot": bool(self.discord_bot_token and self.discord_channel_id),

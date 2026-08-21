@@ -50,6 +50,9 @@ async def lifespan(app: FastAPI):
         state.gemini_api_key = saved_cfg.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))
         state.gemini_model = saved_cfg.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"))
         state.gemini_search_model = saved_cfg.get("gemini_search_model", os.getenv("GEMINI_SEARCH_MODEL", "gemini-3.5-flash"))
+        state.ai_scout_enabled = saved_cfg.get("ai_scout_enabled", True)
+        state.ai_scout_interval_hours = float(saved_cfg.get("ai_scout_interval_hours", 2.0))
+        state.ai_scout_min_confidence = float(saved_cfg.get("ai_scout_min_confidence", 0.85))
             
         enc_api = saved_cfg.get("api_key", "")
         enc_sec = saved_cfg.get("secret_key", "")
@@ -88,9 +91,11 @@ async def lifespan(app: FastAPI):
                 logger.info(f"Discovered {len(models)} active Google Gemini models on boot.")
         asyncio.create_task(init_gemini_models())
 
+    from engine.watchdogs import trade_timeout_watchdog, cost_basis_watchdog, ai_opportunity_scout_watchdog
     asyncio.create_task(start_3ds_tcp_server())
     asyncio.create_task(trade_timeout_watchdog())
     asyncio.create_task(cost_basis_watchdog())
+    asyncio.create_task(ai_opportunity_scout_watchdog())
     asyncio.create_task(start_binance_websocket())
 
     yield

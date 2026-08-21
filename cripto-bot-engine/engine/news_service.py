@@ -115,7 +115,8 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
             from google.genai import types
 
             client = genai.Client(api_key=key)
-            assets_str = ", ".join(assets[:5]) if assets else "BTC, ETH, XRP"
+            target_list = assets if assets else ["BTC", "ETH", "SOL", "BNB"]
+            assets_str = ", ".join(target_list)
             prompt = f"Search live Google breaking news today for cryptocurrency assets {assets_str}. Return key catalysts, SEC filings, or exchange developments."
             
             config = types.GenerateContentConfig(
@@ -179,7 +180,8 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
             try:
                 model_name = getattr(state, "gemini_search_model", "gemini-3.5-flash").replace("models/", "")
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
-                assets_str = ", ".join(assets[:5]) if assets else "BTC, ETH, XRP"
+                target_list = assets if assets else ["BTC", "ETH", "SOL", "BNB"]
+                assets_str = ", ".join(target_list)
                 prompt = f"Search live Google breaking news today for cryptocurrency assets {assets_str}. Return key catalysts, SEC filings, or exchange developments."
                 payload = {
                     "contents": [{"parts": [{"text": prompt}]}],

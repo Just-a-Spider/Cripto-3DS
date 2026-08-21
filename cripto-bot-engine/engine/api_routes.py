@@ -73,6 +73,11 @@ async def update_config(cfg: ConfigModel):
     state.tpsl_strategy.trailing_enabled = cfg.trailing_enabled
     state.tpsl_strategy.trailing_activation_percent = cfg.trailing_activation_percent
     state.tpsl_strategy.trailing_delta_percent = cfg.trailing_delta_percent
+    state.tpsl_strategy.partial_tp_enabled = getattr(cfg, "partial_tp_enabled", True)
+    state.tpsl_strategy.partial_tp_percent = getattr(cfg, "partial_tp_percent", 4.0)
+    state.tpsl_strategy.partial_tp_ratio = getattr(cfg, "partial_tp_ratio", 0.5)
+    state.rsi_strategy.bull_regime_dip_enabled = getattr(cfg, "bull_regime_dip_enabled", True)
+    state.rsi_strategy.bull_rsi_threshold = getattr(cfg, "bull_rsi_threshold", 42.0)
     state.rsi_strategy.timeframe_minutes = cfg.rsi_timeframe_minutes
     state.rsi_strategy.history_length = cfg.rsi_history_length
     state.signal_cooldown_hours = cfg.signal_cooldown_hours
@@ -114,10 +119,12 @@ async def update_config(cfg: ConfigModel):
     state.gemini_model = cfg.gemini_model.strip() if cfg.gemini_model else "gemini-3.1-flash-lite"
     cfg_dict["gemini_model"] = state.gemini_model
 
-    gemini_search_val = getattr(cfg, "gemini_search_model", None)
-    if gemini_search_val:
-        state.gemini_search_model = gemini_search_val.strip()
-    cfg_dict["gemini_search_model"] = state.gemini_search_model
+    state.ai_scout_enabled = getattr(cfg, "ai_scout_enabled", True)
+    state.ai_scout_interval_hours = float(getattr(cfg, "ai_scout_interval_hours", 2.0))
+    state.ai_scout_min_confidence = float(getattr(cfg, "ai_scout_min_confidence", 0.85))
+    cfg_dict["ai_scout_enabled"] = state.ai_scout_enabled
+    cfg_dict["ai_scout_interval_hours"] = state.ai_scout_interval_hours
+    cfg_dict["ai_scout_min_confidence"] = state.ai_scout_min_confidence
 
     await save_config_item("risk_config", cfg_dict)
     logger.info(f"Updated engine config (Keys encrypted using Auth PIN).")

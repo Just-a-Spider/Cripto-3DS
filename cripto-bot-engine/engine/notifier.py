@@ -340,6 +340,49 @@ class DiscordBotService:
             embed.set_footer(text=f"AI Sentiment Engine • Model: {state.gemini_model}")
             await interaction.followup.send(embed=embed)
 
+        @self.tree.command(name="opportunities", description="AI quantitative scan for dip-buys, breakout momentum & take-profit setups")
+        async def cmd_opportunities(interaction: discord.Interaction):
+            from engine.state import state
+            from engine.ai_analyst import scan_market_opportunities
+            await interaction.response.defer()
+            data = await scan_market_opportunities(
+                market_context=state.to_dict(),
+                api_key=state.gemini_api_key,
+                model=state.gemini_model
+            )
+            regime = data.get("market_regime", "NEUTRAL")
+            color = 0x50fa7b if "BULL" in regime else (0xff5555 if "BEAR" in regime else 0x8be9fd)
+            embed = discord.Embed(
+                title=f"🎯 Live Market Opportunities • Regime: {regime}",
+                description=f"**Fear & Greed Index:** `{data.get('fng_str', 'N/A')}`\n💡 **Tactical Summary:** {data.get('tactical_summary', '')}",
+                color=color
+            )
+            opps = data.get("top_opportunities", [])
+            if opps:
+                for o in opps:
+                    stype = o.get("setup_type", "SETUP").upper()
+                    if "PROFIT" in stype or "EXIT" in stype:
+                        action_tag = "SELL (Take Profit)"
+                        emoji = "🟡"
+                    elif "DIP" in stype:
+                        action_tag = "BUY (Dip Buy)"
+                        emoji = "🟢"
+                    else:
+                        action_tag = "BUY (Breakout)"
+                        emoji = "🟣"
+
+                    conf = int(float(o.get("confidence", 0.8)) * 100)
+                    embed.add_field(
+                        name=f"{emoji} {o.get('pair', '')} • **{action_tag}** ({conf}% Confidence)",
+                        value=f"**Levels:** `{o.get('key_levels', 'N/A')}`\n{o.get('analysis', '')}",
+                        inline=False
+                    )
+            else:
+                embed.add_field(name="Active Setups", value="No extreme oversold or overbought setups currently triggered. Market consolidating in balance.", inline=False)
+            
+            embed.set_footer(text=f"AI Quant Scanner • Model: {state.gemini_model}")
+            await interaction.followup.send(embed=embed)
+
         @self.tree.command(name="test", description="Run full unit & integration test suite on server")
         async def cmd_test(interaction: discord.Interaction):
             import asyncio, time
@@ -523,12 +566,21 @@ class DiscordBotService:
             reason = trade.get("reason", "Strategy Signal")
             timeout_sec = trade.get("timeout_sec", 600)
 
-            color = 0x50fa7b if action == "BUY" else 0xff5555
-            embed = discord.Embed(
-                title=f"🚨 Trade Confirmation Required: {action} {pair}",
-                description=f"**Reason:** {reason}",
-                color=color
-            )
+            is_partial = trade.get("is_partial_tp", False)
+            if is_partial:
+                color = 0xf1fa8c # Gold / Yellow for Take Profit
+                embed = discord.Embed(
+                    title=f"💰 Partial Take Profit (TP1): SELL {pair}",
+                    description=f"**Reason:** {reason}\n*(Securing 50% profit; remaining position moves to Breakeven Stop & Trailing Runner)*",
+                    color=color
+                )
+            else:
+                color = 0x50fa7b if action == "BUY" else 0xff5555
+                embed = discord.Embed(
+                    title=f"🚨 Trade Confirmation Required: {action} {pair}",
+                    description=f"**Reason:** {reason}",
+                    color=color
+                )
             embed.add_field(name="Price", value=f"${price:,.4f}", inline=True)
             embed.add_field(name="Amount", value=f"${amount_usdt:.2f} USDT", inline=True)
             embed.add_field(name="Auto-Expires", value=f"<t:{int(time.time() + timeout_sec)}:R>", inline=True)

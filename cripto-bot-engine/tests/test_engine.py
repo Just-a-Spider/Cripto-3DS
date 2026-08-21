@@ -650,6 +650,282 @@ async def test_gemini_call_fallback(monkeypatch):
     assert res == "OK"
     assert len(called) > 0
 
+@pytest.mark.asyncio
+async def test_ask_gemini_full_watchlist_and_positions_context(monkeypatch):
+    from engine.ai_analyst import ask_gemini
+    import engine.ai_analyst as ai_mod
+
+    captured_prompt = []
+    async def mock_call_gemini(prompt, api_key, model=None, system_instruction=None, json_mode=False, use_google_search=False):
+        captured_prompt.append(prompt)
+        return "Market analysis complete."
+
+    monkeypatch.setattr(ai_mod, "call_gemini", mock_call_gemini)
+
+    mock_state = {
+        "favorite_pairs": ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "AVAXUSDT", "NEARUSDT"],
+        "prices": {
+            "BTCUSDT": 65000.0,
+            "ETHUSDT": 3200.0,
+            "SOLUSDT": 180.0,
+            "BNBUSDT": 580.0,
+            "XRPUSDT": 0.60,
+            "ADAUSDT": 0.45,
+            "AVAXUSDT": 28.0,
+            "NEARUSDT": 5.20
+        },
+        "indicators": {
+            "BTCUSDT": {"rsi": 55.0, "pct_b": 0.6},
+            "ETHUSDT": {"rsi": 48.0, "pct_b": 0.4},
+            "SOLUSDT": {"rsi": 41.0, "pct_b": 0.25},
+            "BNBUSDT": {"rsi": 62.0, "pct_b": 0.75},
+            "XRPUSDT": {"rsi": 71.0, "pct_b": 0.90},
+            "ADAUSDT": {"rsi": 38.0, "pct_b": 0.20},
+            "AVAXUSDT": {"rsi": 44.0, "pct_b": 0.30},
+            "NEARUSDT": {"rsi": 50.0, "pct_b": 0.50}
+        },
+        "portfolio": {
+            "USDT": 500.0,
+            "SOL": 2.5,
+            "XRP": 500.0
+        },
+        "cost_bases": {
+            "SOLUSDT": 150.0,
+            "XRPUSDT": 0.50
+        },
+        "usdt_balance": 500.0,
+        "testnet": True,
+        "strategies": {
+            "dca_interval": 3600,
+            "rsi_threshold": 30.0,
+            "bull_rsi_threshold": 42.0,
+            "tp_percent": 5.0,
+            "partial_tp_percent": 4.0,
+            "sl_percent": 3.0
+        }
+    }
+
+    ans = await ask_gemini("Should I take profit on my positions?", mock_state, api_key="valid_key")
+    assert ans == "Market analysis complete."
+    assert len(captured_prompt) == 1
+    prompt_text = captured_prompt[0]
+
+    # Verify all 8 pairs are included (no [:6] truncation!)
+    for pair in ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "ADAUSDT", "AVAXUSDT", "NEARUSDT"]:
+        assert pair in prompt_text
+
+    # Verify open positions with unrealized PnL are included
+    assert "SOL: 2.500000 @ Entry $150.0000" in prompt_text
+    assert "XRP: 500.000000 @ Entry $0.5000" in prompt_text
+
+@pytest.mark.asyncio
+async def test_bull_regime_dip_buying():
+    from engine.strategies import RSIStrategy
+
+    # Oversold is 30.0, but bull_regime_dip_enabled is True and bull_rsi_threshold is 42.0
+    strat = RSIStrategy(oversold_rsi=30.0, bull_regime_dip_enabled=True, bull_rsi_threshold=42.0)
+    strat.enabled = True
+
+    # Simulate price history with healthy bull dip (RSI ~40.4, %B ~0.19, no knife drop)
+    strat.price_histories["SOLUSDT"] = [170.0] * 10 + [175.0, 174.0, 173.0, 172.0, 171.0, 170.0, 169.0, 168.0, 168.2, 168.0]
+    prices = {"SOLUSDT": 168.0}
+    portfolio = {"USDT": 500.0}
+    cost_bases = {}
+
+    sig = strat.evaluate(prices, 500.0, ["SOLUSDT"], portfolio, cost_bases, can_buy=True)
+    assert sig is not None
+    assert sig["action"] == "BUY"
+    assert sig["pair"] == "SOLUSDT"
+    assert "Bull Regime Dip Buy" in sig["reason"]
+
+@pytest.mark.asyncio
+async def test_partial_take_profit_and_breakeven_stop():
+    from engine.strategies import TPSLStrategy
+
+    tpsl = TPSLStrategy(
+        tp_percent=6.0,
+        sl_percent=3.0,
+        trailing_enabled=True,
+        partial_tp_enabled=True,
+        partial_tp_percent=4.0,
+        partial_tp_ratio=0.5
+    )
+    tpsl.enabled = True
+
+    portfolio = {"SOL": 10.0}
+    cost_bases = {"SOLUSDT": 100.0}
+
+    # 1. Price at $104.5 (+4.5% profit) -> Triggers Partial TP (50% position scale-out)
+    prices = {"SOLUSDT": 104.5}
+    sig_tp1 = tpsl.evaluate_tpsl(prices, portfolio, cost_bases)
+    assert sig_tp1 is not None
+    assert sig_tp1["action"] == "SELL"
+    assert sig_tp1["is_partial_tp"] is True
+    assert sig_tp1["amount_asset"] == 5.0 # 50% of 10.0
+    assert "SOLUSDT" in tpsl.tp_staged_positions
+
+    # 2. Re-evaluating immediately should not double-trigger partial TP
+    sig_again = tpsl.evaluate_tpsl(prices, portfolio, cost_bases)
+    assert sig_again is None
+
+    # 3. Simulate price pulling back to $100.1 (+0.1% profit) -> Triggers Breakeven Stop Protection
+    prices_dump = {"SOLUSDT": 100.1}
+    sig_be = tpsl.evaluate_tpsl(prices_dump, portfolio, cost_bases)
+    assert sig_be is not None
+    assert sig_be["action"] == "SELL"
+    assert "Breakeven Stop Protection" in sig_be["reason"]
+    assert "SOLUSDT" not in tpsl.tp_staged_positions
+
+@pytest.mark.asyncio
+async def test_scan_market_opportunities(monkeypatch):
+    from engine.ai_analyst import scan_market_opportunities
+    import engine.ai_analyst as ai_mod
+
+    # 1. Fallback when no key
+    res_no_key = await scan_market_opportunities({}, api_key="")
+    assert res_no_key["market_regime"] == "NEUTRAL"
+    assert len(res_no_key["top_opportunities"]) == 0
+
+    # 2. Mocked Gemini response
+    async def mock_call_gemini(prompt, api_key, model=None, system_instruction=None, json_mode=False, use_google_search=False):
+        return """```json
+{
+  "market_regime": "BULLISH_GREED",
+  "top_opportunities": [
+    {
+      "pair": "SOLUSDT",
+      "setup_type": "DIP_BUY",
+      "confidence": 0.88,
+      "key_levels": "Support: $170.00, Resistance: $192.00",
+      "analysis": "RSI pulled back to 41 near lower Bollinger Band with strong macro greed support."
+    },
+    {
+      "pair": "XRPUSDT",
+      "setup_type": "TAKE_PROFIT",
+      "confidence": 0.82,
+      "key_levels": "Resistance: $0.62",
+      "analysis": "RSI 71 overbought testing resistance. Partial 50% TP recommended."
+    }
+  ],
+  "tactical_summary": "Buy minor dips on large caps and secure partial profits on overextended runners."
+}
+```"""
+    monkeypatch.setattr(ai_mod, "call_gemini", mock_call_gemini)
+
+    mock_state = {
+        "favorite_pairs": ["SOLUSDT", "XRPUSDT"],
+        "prices": {"SOLUSDT": 172.0, "XRPUSDT": 0.61},
+        "indicators": {
+            "SOLUSDT": {"rsi": 41.0, "pct_b": 0.22},
+            "XRPUSDT": {"rsi": 71.0, "pct_b": 0.88}
+        },
+        "portfolio": {"SOL": 2.0},
+        "cost_bases": {"SOLUSDT": 160.0}
+    }
+
+    data = await scan_market_opportunities(mock_state, api_key="valid_key")
+    assert data["market_regime"] == "BULLISH_GREED"
+    assert len(data["top_opportunities"]) == 2
+    assert data["top_opportunities"][0]["setup_type"] == "DIP_BUY"
+    assert data["top_opportunities"][1]["setup_type"] == "TAKE_PROFIT"
+    assert "Buy minor dips" in data["tactical_summary"]
+
+@pytest.mark.asyncio
+async def test_ai_scout_dynamic_config_update():
+    from engine.state import state
+    from httpx import AsyncClient, ASGITransport
+    from main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        cfg_payload = {
+            "max_trade_usdt": 15.0,
+            "max_daily_spend_usdt": 50.0,
+            "min_usdt_reserve": 20.0,
+            "require_human_approval": True,
+            "auth_pin": state.auth_pin,
+            "favorite_pairs": "BTCUSDT,ETHUSDT,SOLUSDT",
+            "testnet": True,
+            "dca_interval": 3600,
+            "rsi_threshold": 30.0,
+            "tp_percent": 5.0,
+            "sl_percent": 3.0,
+            "trailing_enabled": True,
+            "trailing_activation_percent": 3.0,
+            "trailing_delta_percent": 1.5,
+            "ai_scout_enabled": True,
+            "ai_scout_interval_hours": 3.5,
+            "ai_scout_min_confidence": 0.90,
+            "rsi_timeframe_minutes": 60,
+            "rsi_history_length": 250,
+            "signal_cooldown_hours": 24.0
+        }
+        res = await ac.post("/api/config", json=cfg_payload, headers={"X-Auth-PIN": state.auth_pin})
+        assert res.status_code == 200
+
+        # Verify state updated dynamically without hardcoding
+        assert state.ai_scout_enabled is True
+        assert state.ai_scout_interval_hours == 3.5
+        assert state.ai_scout_min_confidence == 0.90
+
+        # Verify to_dict contains updated ai_scout config
+        state_dict = state.to_dict()
+        assert state_dict["ai_scout"]["enabled"] is True
+        assert state_dict["ai_scout"]["interval_hours"] == 3.5
+        assert state_dict["ai_scout"]["min_confidence"] == 0.90
+
+@pytest.mark.asyncio
+async def test_ai_scout_watchdog_execution(monkeypatch):
+    import asyncio
+    from engine.state import state
+    import engine.watchdogs as wd_mod
+    import engine.ai_analyst as ai_mod
+
+    state.is_active = True
+    state.gemini_api_key = "valid_key"
+    state.pending_trade = None
+    state.prices["SOLUSDT"] = 180.0
+    state.usdt_balance = 500.0
+    state.ai_scout_enabled = True
+    state.ai_scout_interval_hours = 1.0
+    state.ai_scout_min_confidence = 0.85
+    wd_mod._last_scout_time = 0.0
+    wd_mod._scout_cooldowns.clear()
+
+    # 1. Mock scan_market_opportunities with a high-confidence setup
+    async def mock_scan(ctx, api_key, model=None):
+        return {
+            "market_regime": "BULLISH_GREED",
+            "top_opportunities": [
+                {
+                    "pair": "SOLUSDT",
+                    "setup_type": "DIP_BUY",
+                    "confidence": 0.92,
+                    "key_levels": "Support: $175",
+                    "analysis": "High confidence consolidation breakout on 4h candle close."
+                }
+            ]
+        }
+
+    monkeypatch.setattr(wd_mod, "scan_market_opportunities", mock_scan)
+
+    # Trigger watchdog iteration
+    task = asyncio.create_task(wd_mod.ai_opportunity_scout_watchdog())
+    await asyncio.sleep(0.05) # Allow watchdog to run first iteration
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert state.pending_trade is not None
+    assert state.pending_trade["action"] == "BUY"
+    assert state.pending_trade["pair"] == "SOLUSDT"
+    assert state.pending_trade["is_ai_scout"] is True
+    assert "92% Conf" in state.pending_trade["reason"]
+
+
+
 
 
 

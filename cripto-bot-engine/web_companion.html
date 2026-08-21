@@ -553,6 +553,26 @@
                     <input type="number" id="trailing-delta" value="1.5" step="0.1">
                 </div>
                 <div>
+                    <label>Enable Bull Regime Dip Buy:</label>
+                    <input type="checkbox" id="bull-dip-enabled" style="width: 22px; height: 22px; margin-top: 8px;" checked>
+                </div>
+                <div>
+                    <label>Bull Dip RSI Threshold (&le;42):</label>
+                    <input type="number" id="bull-rsi-threshold" value="42.0" step="1.0">
+                </div>
+                <div>
+                    <label>Enable Staged Partial TP:</label>
+                    <input type="checkbox" id="partial-tp-enabled" style="width: 22px; height: 22px; margin-top: 8px;" checked>
+                </div>
+                <div>
+                    <label>Partial TP1 Target (%):</label>
+                    <input type="number" id="partial-tp-percent" value="4.0" step="0.5">
+                </div>
+                <div>
+                    <label>Partial TP Ratio (0.5 = 50%):</label>
+                    <input type="number" id="partial-tp-ratio" value="0.5" step="0.05" min="0.1" max="1.0">
+                </div>
+                <div>
                     <label>Discord Bot Token (Interactive Buttons):</label>
                     <input type="password" id="discord-bot-token" placeholder="Bot Token from Discord Portal">
                 </div>
@@ -571,7 +591,7 @@
 
             <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
 
-            <h3>🤖 Google AI Studio (Gemini)</h3>
+            <h3>🤖 Google AI Studio & Autonomous Scout</h3>
             <p style="font-size: 0.85rem; color: var(--comment); margin-bottom: 12px;">Get a free API key at <a href="https://aistudio.google.com" target="_blank" style="color: var(--accent);">aistudio.google.com</a> (100% Free Tier, 0 maintenance cost).</p>
             <div class="grid">
                 <div style="grid-column: 1 / span 2;">
@@ -598,6 +618,18 @@
                         <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
                         <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
                     </select>
+                </div>
+                <div>
+                    <label>Enable Autonomous AI Scout (Every 2h):</label>
+                    <input type="checkbox" id="ai-scout-enabled" style="width: 22px; height: 22px; margin-top: 8px;" checked>
+                </div>
+                <div>
+                    <label>AI Scout Interval (Hours):</label>
+                    <input type="number" id="ai-scout-interval" value="2.0" step="0.5" min="0.25">
+                </div>
+                <div style="grid-column: 1 / span 2;">
+                    <label>AI Scout Min Confidence (0.85 = 85%):</label>
+                    <input type="number" id="ai-scout-confidence" value="0.85" step="0.05" min="0.5" max="1.0">
                 </div>
             </div>
             
@@ -741,6 +773,16 @@
                 document.getElementById('trailing-enabled').checked = data.strategies.trailing_enabled !== false;
                 document.getElementById('trailing-activation').value = data.strategies.trailing_activation_percent || 3.0;
                 document.getElementById('trailing-delta').value = data.strategies.trailing_delta_percent || 1.5;
+                document.getElementById('bull-dip-enabled').checked = data.strategies.bull_regime_dip_enabled !== false;
+                document.getElementById('bull-rsi-threshold').value = data.strategies.bull_rsi_threshold || 42.0;
+                document.getElementById('partial-tp-enabled').checked = data.strategies.partial_tp_enabled !== false;
+                document.getElementById('partial-tp-percent').value = data.strategies.partial_tp_percent || 4.0;
+                document.getElementById('partial-tp-ratio').value = data.strategies.partial_tp_ratio || 0.5;
+                if (data.ai_scout) {
+                    document.getElementById('ai-scout-enabled').checked = data.ai_scout.enabled !== false;
+                    document.getElementById('ai-scout-interval').value = data.ai_scout.interval_hours || 2.0;
+                    document.getElementById('ai-scout-confidence').value = data.ai_scout.min_confidence || 0.85;
+                }
                 document.getElementById('rsi-timeframe').value = data.strategies.rsi_timeframe_minutes || 60;
                 document.getElementById('rsi-history').value = data.strategies.rsi_history_length || 250;
                 document.getElementById('signal-cooldown').value = data.strategies.signal_cooldown_hours || 24;
@@ -979,6 +1021,14 @@
                 trailing_enabled: document.getElementById('trailing-enabled').checked,
                 trailing_activation_percent: parseFloat(document.getElementById('trailing-activation').value) || 3.0,
                 trailing_delta_percent: parseFloat(document.getElementById('trailing-delta').value) || 1.5,
+                bull_regime_dip_enabled: document.getElementById('bull-dip-enabled').checked,
+                bull_rsi_threshold: parseFloat(document.getElementById('bull-rsi-threshold').value) || 42.0,
+                partial_tp_enabled: document.getElementById('partial-tp-enabled').checked,
+                partial_tp_percent: parseFloat(document.getElementById('partial-tp-percent').value) || 4.0,
+                partial_tp_ratio: parseFloat(document.getElementById('partial-tp-ratio').value) || 0.5,
+                ai_scout_enabled: document.getElementById('ai-scout-enabled').checked,
+                ai_scout_interval_hours: parseFloat(document.getElementById('ai-scout-interval').value) || 2.0,
+                ai_scout_min_confidence: parseFloat(document.getElementById('ai-scout-confidence').value) || 0.85,
                 rsi_timeframe_minutes: parseInt(document.getElementById('rsi-timeframe').value) || 60,
                 rsi_history_length: parseInt(document.getElementById('rsi-history').value) || 250,
                 signal_cooldown_hours: parseFloat(document.getElementById('signal-cooldown').value) || 24.0,
@@ -1019,6 +1069,14 @@
                     trailing_enabled: document.getElementById('trailing-enabled').checked,
                     trailing_activation_percent: parseFloat(document.getElementById('trailing-activation').value) || 3.0,
                     trailing_delta_percent: parseFloat(document.getElementById('trailing-delta').value) || 1.5,
+                    bull_regime_dip_enabled: document.getElementById('bull-dip-enabled').checked,
+                    bull_rsi_threshold: parseFloat(document.getElementById('bull-rsi-threshold').value) || 42.0,
+                    partial_tp_enabled: document.getElementById('partial-tp-enabled').checked,
+                    partial_tp_percent: parseFloat(document.getElementById('partial-tp-percent').value) || 4.0,
+                    partial_tp_ratio: parseFloat(document.getElementById('partial-tp-ratio').value) || 0.5,
+                    ai_scout_enabled: document.getElementById('ai-scout-enabled').checked,
+                    ai_scout_interval_hours: parseFloat(document.getElementById('ai-scout-interval').value) || 2.0,
+                    ai_scout_min_confidence: parseFloat(document.getElementById('ai-scout-confidence').value) || 0.85,
                     rsi_timeframe_minutes: parseInt(document.getElementById('rsi-timeframe').value) || 60,
                     rsi_history_length: parseInt(document.getElementById('rsi-history').value) || 250,
                     signal_cooldown_hours: parseFloat(document.getElementById('signal-cooldown').value) || 24.0,
@@ -1026,7 +1084,8 @@
                     discord_bot_token: token,
                     discord_channel_id: channel,
                     gemini_api_key: document.getElementById('gemini-api-key').value,
-                    gemini_model: document.getElementById('gemini-model').value
+                    gemini_model: document.getElementById('gemini-model').value,
+                    gemini_search_model: document.getElementById('gemini-search-model').value
                 };
                 await fetch(getApiBase() + '/api/config', {
                     method: 'POST',
