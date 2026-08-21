@@ -582,9 +582,11 @@
                     <label>Primary Inference Model:</label>
                     <div style="display: flex; gap: 8px;">
                         <select id="gemini-model" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
-                            <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fastest / Recommended)</option>
-                            <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                            <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fastest / Recommended / 500 RPD)</option>
+                            <option value="gemini-flash-lite-latest">gemini-flash-lite-latest</option>
+                            <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+                            <option value="gemini-3.5-flash">gemini-3.5-flash</option>
+                            <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
                         </select>
                         <button type="button" class="btn btn-blue" onclick="fetchGeminiModels()" style="padding: 6px 10px; font-size: 0.8rem; white-space: nowrap; flex:0 0 auto; min-width:auto;">REFETCH</button>
                     </div>
@@ -592,8 +594,8 @@
                 <div>
                     <label>Search Grounding Model (Web Search):</label>
                     <select id="gemini-search-model" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
-                        <option value="gemini-2.5-flash">gemini-2.5-flash (1,500 Free Daily Searches)</option>
-                        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                        <option value="gemini-3.5-flash">gemini-3.5-flash (Web Search Grounding)</option>
+                        <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
                         <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
                     </select>
                 </div>

@@ -124,7 +124,7 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
             )
             
             loop = asyncio.get_running_loop()
-            model_name = getattr(state, "gemini_model", "gemini-2.5-flash").replace("models/", "")
+            model_name = getattr(state, "gemini_search_model", "gemini-3.5-flash").replace("models/", "")
             
             response = await loop.run_in_executor(
                 None,
@@ -177,7 +177,7 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
         except ImportError:
             # Pure HTTP REST Grounding Caller for armv8l Termux
             try:
-                model_name = getattr(state, "gemini_model", "gemini-2.5-flash").replace("models/", "")
+                model_name = getattr(state, "gemini_search_model", "gemini-3.5-flash").replace("models/", "")
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
                 assets_str = ", ".join(assets[:5]) if assets else "BTC, ETH, XRP"
                 prompt = f"Search live Google breaking news today for cryptocurrency assets {assets_str}. Return key catalysts, SEC filings, or exchange developments."
@@ -224,10 +224,12 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
                                 if items:
                                     logger.info(f"Google Search Grounding REST API retrieved {len(items)} live web news items.")
                                     return items[:10]
+                        else:
+                            logger.info(f"Google Search Grounding returned HTTP {resp.status} (delegating cleanly to CryptoPanic provider).")
             except Exception as e_rest:
-                logger.warning(f"Google Search Grounding REST error: {e_rest}")
+                logger.debug(f"Google Search Grounding REST note: {e_rest}")
         except Exception as e:
-            logger.warning(f"Google Search Grounding news fetch error (switching to fallback provider): {e}")
+            logger.info(f"Google Search Grounding unavailable ({e}). Delegating to CryptoPanic provider.")
 
         return await self.fallback.fetch_news(assets)
 

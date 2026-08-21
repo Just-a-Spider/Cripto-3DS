@@ -47,7 +47,7 @@ class ConfigModel(BaseModel):
     discord_channel_id: str = ""
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.1-flash-lite"
-    gemini_search_model: str = "gemini-2.5-flash"
+    gemini_search_model: str = "gemini-3.5-flash"
 
 class BotState:
     def __init__(self):
@@ -82,8 +82,8 @@ class BotState:
         self.discord_channel_id: str = ""
         self.gemini_api_key: str = ""
         self.gemini_model: str = "gemini-3.1-flash-lite"
-        self.gemini_search_model: str = "gemini-2.5-flash"
-        self.available_gemini_models: List[str] = ["gemini-3.1-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
+        self.gemini_search_model: str = "gemini-3.5-flash"
+        self.available_gemini_models: List[str] = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
 
     def to_dict(self) -> Dict[str, Any]:
         indicators = {}

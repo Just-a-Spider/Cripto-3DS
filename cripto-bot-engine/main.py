@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
         state.discord_channel_id = saved_cfg.get("discord_channel_id", os.getenv("DISCORD_CHANNEL_ID", ""))
         state.gemini_api_key = saved_cfg.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))
         state.gemini_model = saved_cfg.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"))
-        state.gemini_search_model = saved_cfg.get("gemini_search_model", os.getenv("GEMINI_SEARCH_MODEL", "gemini-2.5-flash"))
+        state.gemini_search_model = saved_cfg.get("gemini_search_model", os.getenv("GEMINI_SEARCH_MODEL", "gemini-3.5-flash"))
             
         enc_api = saved_cfg.get("api_key", "")
         enc_sec = saved_cfg.get("secret_key", "")

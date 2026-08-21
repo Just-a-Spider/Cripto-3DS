@@ -6,7 +6,8 @@ from typing import Optional, Dict, Any, List, Union
 
 logger = logging.getLogger("CriptoBotEngine")
 
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_GEMINI_SEARCH_MODEL = "gemini-3.5-flash"
 
 # In-memory cache for Fear & Greed Index (1 hour TTL)
 _fng_cache: Dict[str, Any] = {
@@ -56,10 +57,33 @@ try:
 except ImportError:
     HAS_GENAI_SDK = False
 
+ACTIVE_GEMINI_PRIORITY = [
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+    "gemini-3.1-pro-preview",
+    "gemini-pro-latest"
+]
+
+def _is_unsupported_model(name: str) -> bool:
+    name_lower = name.lower()
+    unsupported_substrings = [
+        "embedding", "aqa", "imagen", "veo", "robotics", "tts", "computer-use", "image"
+    ]
+    if any(x in name_lower for x in unsupported_substrings):
+        return True
+    # Filter out deprecated models that return 404
+    if any(name_lower.startswith(x) for x in ["gemini-2.5", "gemini-2.0", "gemini-1.5"]):
+        return True
+    return False
+
 async def fetch_available_gemini_models(api_key: str) -> List[str]:
     """
     Queries Google AI Studio to discover all valid generateContent models active on the user's account.
-    Filters specifically for standard gemini-* text generation models.
+    Filters specifically for standard active gemini-* text generation models.
     """
     clean_key = str(api_key or "").strip().strip('"').strip("'")
     if not clean_key:
@@ -73,18 +97,12 @@ async def fetch_available_gemini_models(api_key: str) -> List[str]:
             models_list = []
             for m in models_res:
                 name = m.name.replace("models/", "").strip() if hasattr(m, "name") else ""
-                if name.startswith("gemini-") and not any(x in name for x in ["embedding", "aqa", "imagen", "veo", "robotics"]):
+                if name.startswith("gemini-") and not _is_unsupported_model(name):
                     models_list.append(name)
             if models_list:
-                priority_order = [
-                    "gemini-2.5-flash", "gemini-2.5-flash-lite", 
-                    "gemini-3.1-flash-lite", "gemini-1.5-flash", 
-                    "gemini-1.5-flash-latest", "gemini-2.0-flash", 
-                    "gemini-3.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"
-                ]
                 def sort_key(name: str):
                     try:
-                        return (0, priority_order.index(name))
+                        return (0, ACTIVE_GEMINI_PRIORITY.index(name))
                     except ValueError:
                         return (1, name)
                 return sorted(list(set(models_list)), key=sort_key)
@@ -105,18 +123,12 @@ async def fetch_available_gemini_models(api_key: str) -> List[str]:
                     raw_name = m.get("name", "")
                     clean_name = raw_name.replace("models/", "").strip()
                     if "generateContent" in methods and clean_name.startswith("gemini-"):
-                        if not any(x in clean_name for x in ["embedding", "aqa", "imagen", "veo", "robotics"]):
+                        if not _is_unsupported_model(clean_name):
                             models_list.append(clean_name)
                 
-                priority_order = [
-                    "gemini-2.5-flash", "gemini-2.5-flash-lite", 
-                    "gemini-3.1-flash-lite", "gemini-1.5-flash", 
-                    "gemini-1.5-flash-latest", "gemini-2.0-flash", 
-                    "gemini-3.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"
-                ]
                 def sort_key(name: str):
                     try:
-                        return (0, priority_order.index(name))
+                        return (0, ACTIVE_GEMINI_PRIORITY.index(name))
                     except ValueError:
                         return (1, name)
 
@@ -136,7 +148,7 @@ async def call_gemini(
 ) -> Optional[str]:
     """
     Caller for Google AI Studio Gemini API using native google.genai SDK with HTTP auto-fallback.
-    Supports native Google Search Grounding (types.Tool(google_search=types.GoogleSearch())).
+    Supports native Google Search Grounding with auto-recovery to pure text on tool quota 429 errors.
     """
     clean_key = str(api_key or "").strip().strip('"').strip("'")
     if not clean_key:
@@ -178,69 +190,74 @@ async def call_gemini(
             if response and response.text:
                 return response.text.strip()
         except Exception as e:
-            logger.warning(f"Google GenAI SDK error on model {clean_model} (switching to HTTP fallback): {e}")
+            logger.debug(f"Google GenAI SDK on {clean_model} (switching to HTTP fallback): {e}")
 
-    from engine.state import state
+    # Build comprehensive model fallback candidate list
     models_to_try = [clean_model]
     discovered = getattr(state, "available_gemini_models", [])
     for m_disc in discovered:
         m_clean = str(m_disc).replace("models/", "").strip()
-        if m_clean and m_clean not in models_to_try and "embedding" not in m_clean.lower() and "imagen" not in m_clean.lower():
+        if m_clean and m_clean not in models_to_try and not _is_unsupported_model(m_clean):
             models_to_try.append(m_clean)
-            if len(models_to_try) >= 3:
-                break
 
-    if len(models_to_try) < 3:
-        for fb in ["gemini-2.0-flash", "gemini-1.5-flash-8b", "gemini-2.5-flash"]:
-            if fb not in models_to_try:
-                models_to_try.append(fb)
-                if len(models_to_try) >= 3:
-                    break
-
-    models_to_try = models_to_try[:3]
+    for fb in ACTIVE_GEMINI_PRIORITY:
+        if fb not in models_to_try:
+            models_to_try.append(fb)
 
     for m in models_to_try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={clean_key}"
-        gen_config: Dict[str, Any] = {
-            "temperature": 0.2 if json_mode else 0.3,
-            "maxOutputTokens": 600
-        }
-        if json_mode:
-            gen_config["responseMimeType"] = "application/json"
-
-        payload: Dict[str, Any] = {
-            "contents": [
-                {
-                    "parts": [{"text": prompt}]
-                }
-            ],
-            "generationConfig": gen_config
-        }
-        if system_instruction:
-            payload["system_instruction"] = {
-                "parts": [{"text": system_instruction}]
+        # Try with requested search tool setting first
+        tools_to_try = [{"google_search": {}}] if use_google_search else []
+        
+        while True:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={clean_key}"
+            gen_config: Dict[str, Any] = {
+                "temperature": 0.2 if json_mode else 0.3,
+                "maxOutputTokens": 600
             }
-        if use_google_search:
-            payload["tools"] = [{"google_search": {}}]
+            if json_mode:
+                gen_config["responseMimeType"] = "application/json"
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        candidates = data.get("candidates", [])
-                        if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            if parts:
-                                return parts[0].get("text", "").strip()
-                    else:
-                        err_text = await resp.text()
-                        logger.warning(f"Gemini API model {m} returned HTTP {resp.status}: {err_text[:120]}")
-                        continue
-        except aiohttp.ClientError as e:
-            logger.warning(f"Gemini API network error on {m}: {e}")
-        except Exception as e:
-            logger.warning(f"Gemini API error on {m}: {type(e).__name__}: {e}")
+            payload: Dict[str, Any] = {
+                "contents": [
+                    {
+                        "parts": [{"text": prompt}]
+                    }
+                ],
+                "generationConfig": gen_config
+            }
+            if system_instruction:
+                payload["system_instruction"] = {
+                    "parts": [{"text": system_instruction}]
+                }
+            if tools_to_try:
+                payload["tools"] = tools_to_try
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    return parts[0].get("text", "").strip()
+                        else:
+                            err_text = await resp.text()
+                            # If search tool caused 429/400, strip tool and immediately retry as pure text
+                            if tools_to_try and (resp.status in [400, 429] or "quota" in err_text.lower()):
+                                logger.info(f"Gemini model {m} search tool rate-limited (HTTP {resp.status}). Retrying as pure text...")
+                                tools_to_try = []
+                                continue
+                            
+                            logger.warning(f"Gemini API model {m} returned HTTP {resp.status}: {err_text[:120]}")
+                            break
+            except aiohttp.ClientError as e:
+                logger.warning(f"Gemini API network error on {m}: {e}")
+                break
+            except Exception as e:
+                logger.warning(f"Gemini API error on {m}: {type(e).__name__}: {e}")
+                break
 
     return None
 
@@ -368,21 +385,25 @@ async def summarize_news_insights(api_key: str, model: str = DEFAULT_GEMINI_MODE
     from engine.news_service import news_service
     cached = await news_service.get_latest_news(["BTC", "ETH", "XRP", "XLM", "DOGE"], force_refresh=True)
 
-    prompt = """
-Search Google live for today's breaking cryptocurrency news, market catalysts, SEC updates, macro economic events, and exchange developments for BTC, ETH, XRP, XLM, DOGE.
+    headline_lines = [f"- [{h.sentiment_tag}] {h.asset}: {h.title} (Source: {h.source})" for h in cached[:8]]
+    headlines_text = "\n".join(headline_lines) if headline_lines else "No breaking items."
 
-Synthesize your live search findings into valid JSON:
-{
+    prompt = f"""
+Analyze these live cryptocurrency headlines and market events:
+{headlines_text}
+
+Synthesize these findings into valid JSON:
+{{
   "bullets": [
-    "Specific live breaking news catalyst #1 discovered from web search",
-    "Specific live breaking news catalyst #2 discovered from web search",
-    "Specific live breaking news catalyst #3 discovered from web search"
+    "Specific key catalyst #1 summarized concisely",
+    "Specific key catalyst #2 summarized concisely",
+    "Specific key catalyst #3 summarized concisely"
   ],
   "overall_catalyst": "BULLISH" | "BEARISH" | "NEUTRAL"
-}
+}}
 """
-    system_inst = "You are a senior quantitative financial news analyst. Search Google live and return strictly valid JSON."
-    raw = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True, use_google_search=True)
+    system_inst = "You are a senior quantitative financial news analyst. Return strictly valid JSON."
+    raw = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True, use_google_search=False)
 
     if not raw:
         return {
@@ -448,7 +469,7 @@ Live Bot Market Context:
 Please answer the user's question clearly, incorporating live technical and macro sentiment context where relevant. Keep response concise, actionable, and formatted nicely in Discord markdown.
 """
     system_inst = "You are Cripto-3DS AI Assistant, an expert quantitative cryptocurrency analyst and algorithmic trading assistant."
-    result = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, use_google_search=True)
+    result = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, use_google_search=False)
     return result or "⚠️ Gemini AI was unable to generate a response. Please try again."
 
 

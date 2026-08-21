@@ -334,7 +334,7 @@ def test_gemini_state_and_config():
     assert "has_gemini" in d
     assert "available_gemini_models" in d
     assert d["gemini_model"] == "gemini-3.1-flash-lite"
-    assert d["gemini_search_model"] == "gemini-2.5-flash"
+    assert d["gemini_search_model"] == "gemini-3.5-flash"
 
 @pytest.mark.asyncio
 async def test_clear_trade_history():
@@ -609,6 +609,46 @@ async def test_manual_buy_execution():
     assert res["pair"] == "SOLUSDT"
     assert res["bought_usdt"] == 15.0
     assert state.portfolio_balances["SOL"] > 0
+
+@pytest.mark.asyncio
+async def test_gemini_unsupported_model_filter():
+    from engine.ai_analyst import _is_unsupported_model
+    assert _is_unsupported_model("gemini-2.5-flash") is True
+    assert _is_unsupported_model("gemini-2.0-flash") is True
+    assert _is_unsupported_model("gemini-1.5-flash") is True
+    assert _is_unsupported_model("gemini-3.1-flash-lite-tts") is True
+    assert _is_unsupported_model("gemini-3.1-flash-lite") is False
+    assert _is_unsupported_model("gemini-3.5-flash") is False
+    assert _is_unsupported_model("gemini-flash-lite-latest") is False
+
+@pytest.mark.asyncio
+async def test_gemini_call_fallback(monkeypatch):
+    import aiohttp
+    import engine.ai_analyst as ai_mod
+    from engine.ai_analyst import call_gemini
+
+    monkeypatch.setattr(ai_mod, "HAS_GENAI_SDK", False)
+
+    called = []
+    def mock_post(self, url, json=None, timeout=None):
+        called.append(url)
+        class MockResp:
+            status = 200
+            async def json(self):
+                return {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}
+            async def text(self):
+                return "OK"
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, *args):
+                pass
+        return MockResp()
+
+    monkeypatch.setattr(aiohttp.ClientSession, "post", mock_post)
+
+    res = await call_gemini("Test", "test_key", model="gemini-3.1-flash-lite")
+    assert res == "OK"
+    assert len(called) > 0
 
 
 
