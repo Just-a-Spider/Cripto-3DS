@@ -78,11 +78,23 @@ async def listen_market_data(bm):
                                 logger.info(f"Strategy signal generated: {sig}")
                                 await save_strategy_state()
 
-                                from engine.notifier import send_discord_notification
-                                cfg = await load_config_item("risk_config") or {}
-                                subject = f"Crypto Bot Alert: {sig['action']} {sig['pair']}"
-                                body = f"A new {sig['action']} signal for {sig['pair']} requires your approval.\nPrice: {sig['price']}\nReason: {sig.get('reason', sig.get('strategy'))}"
-                                asyncio.create_task(send_discord_notification(subject, body, cfg, trade=state.pending_trade))
+                                if not risk_manager.require_human_approval:
+                                    logger.info(f"Auto-executing trade (approval not required): {sig['action']} {sig['pair']}")
+                                    from engine.trades import decide_trade
+                                    result = await decide_trade(approved=True)
+                                    logger.info(f"Auto-execution result: {result.get('status')}")
+
+                                    from engine.notifier import send_discord_notification
+                                    cfg = await load_config_item("risk_config") or {}
+                                    subject = f"Crypto Bot Alert: {sig['action']} {sig['pair']} Auto-Executed"
+                                    body = f"Trade automatically executed (approval not required).\nAction: {sig['action']}\nPair: {sig['pair']}\nPrice: {sig['price']}\nStatus: {result.get('status')}"
+                                    asyncio.create_task(send_discord_notification(subject, body, cfg))
+                                else:
+                                    from engine.notifier import send_discord_notification
+                                    cfg = await load_config_item("risk_config") or {}
+                                    subject = f"Crypto Bot Alert: {sig['action']} {sig['pair']}"
+                                    body = f"A new {sig['action']} signal for {sig['pair']} requires your approval.\nPrice: {sig['price']}\nReason: {sig.get('reason', sig.get('strategy'))}"
+                                    asyncio.create_task(send_discord_notification(subject, body, cfg, trade=state.pending_trade))
 
                         await broadcast_state()
     except Exception as e:

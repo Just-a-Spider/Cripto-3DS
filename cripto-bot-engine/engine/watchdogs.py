@@ -117,11 +117,23 @@ async def ai_opportunity_scout_watchdog():
                         logger.info(f"AI Opportunity Scout generated proposed trade: {action} {pair} (Conf: {conf})")
                         await broadcast_state()
 
-                        from engine.notifier import send_discord_notification
-                        cfg = await load_config_item("risk_config") or {}
-                        subject = f"Crypto Bot Alert: AI Scout {action} {pair}"
-                        body = f"AI Opportunity Scout detected a high-probability {stype} setup ({int(conf*100)}% confidence).\nReason: {analysis}"
-                        asyncio.create_task(send_discord_notification(subject, body, cfg, trade=state.pending_trade))
+                        if not risk_manager.require_human_approval:
+                            logger.info(f"AI Scout: Auto-executing trade (approval not required): {action} {pair}")
+                            from engine.trades import decide_trade
+                            result = await decide_trade(approved=True)
+                            logger.info(f"AI Scout auto-execution result: {result.get('status')}")
+
+                            from engine.notifier import send_discord_notification
+                            cfg = await load_config_item("risk_config") or {}
+                            subject = f"Crypto Bot Alert: AI Scout {action} {pair} Auto-Executed"
+                            body = f"AI Opportunity Scout trade automatically executed ({int(conf*100)}% confidence).\nReason: {analysis}\nStatus: {result.get('status')}"
+                            asyncio.create_task(send_discord_notification(subject, body, cfg))
+                        else:
+                            from engine.notifier import send_discord_notification
+                            cfg = await load_config_item("risk_config") or {}
+                            subject = f"Crypto Bot Alert: AI Scout {action} {pair}"
+                            body = f"AI Opportunity Scout detected a high-probability {stype} setup ({int(conf*100)}% confidence).\nReason: {analysis}"
+                            asyncio.create_task(send_discord_notification(subject, body, cfg, trade=state.pending_trade))
                         trade_staged = True
                         break
 

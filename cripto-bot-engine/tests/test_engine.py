@@ -924,6 +924,56 @@ async def test_ai_scout_watchdog_execution(monkeypatch):
     assert state.pending_trade["is_ai_scout"] is True
     assert "92% Conf" in state.pending_trade["reason"]
 
+@pytest.mark.asyncio
+async def test_ai_scout_auto_execution_when_approval_disabled(monkeypatch):
+    import asyncio
+    from engine.state import state
+    from engine.risk_manager import risk_manager
+    import engine.watchdogs as wd_mod
+    from engine.db import get_trade_history
+
+    risk_manager.require_human_approval = False
+    state.is_active = True
+    state.gemini_api_key = "valid_key"
+    state.pending_trade = None
+    state.prices["SOLUSDT"] = 180.0
+    state.usdt_balance = 500.0
+    state.ai_scout_enabled = True
+    state.ai_scout_interval_hours = 1.0
+    state.ai_scout_min_confidence = 0.85
+    wd_mod._last_scout_time = 0.0
+    wd_mod._scout_cooldowns.clear()
+
+    async def mock_scan(ctx, api_key, model=None):
+        return {
+            "market_regime": "BULLISH_GREED",
+            "top_opportunities": [
+                {
+                    "pair": "SOLUSDT",
+                    "setup_type": "DIP_BUY",
+                    "confidence": 0.95,
+                    "key_levels": "Support: $175",
+                    "analysis": "Immediate auto-executable breakout."
+                }
+            ]
+        }
+
+    monkeypatch.setattr(wd_mod, "scan_market_opportunities", mock_scan)
+
+    task = asyncio.create_task(wd_mod.ai_opportunity_scout_watchdog())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    # Trade should have been auto-executed immediately, leaving no pending_trade
+    assert state.pending_trade is None
+    trades = await get_trade_history(limit=5, is_testnet=state.testnet)
+    assert any(t["pair"] == "SOLUSDT" and t["status"] == "EXECUTED" for t in trades)
+
+
 
 
 
