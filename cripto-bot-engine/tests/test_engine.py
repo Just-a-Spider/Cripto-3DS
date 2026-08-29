@@ -893,7 +893,7 @@ async def test_ai_scout_watchdog_execution(monkeypatch):
     wd_mod._scout_cooldowns.clear()
 
     # 1. Mock scan_market_opportunities with a high-confidence setup
-    async def mock_scan(ctx, api_key, model=None):
+    async def mock_scan(ctx, api_key, model=None, market_regime=None):
         return {
             "market_regime": "BULLISH_GREED",
             "top_opportunities": [

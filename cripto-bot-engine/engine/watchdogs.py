@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 from engine.logger import logger
 from engine.state import state
 from engine.ws_manager import broadcast_state
@@ -35,7 +36,24 @@ async def ai_opportunity_scout_watchdog():
     while True:
         try:
             if getattr(state, "ai_scout_enabled", True) and state.is_active and state.gemini_api_key and not state.pending_trade:
-                interval_hours = max(0.25, float(getattr(state, "ai_scout_interval_hours", 2.0)))
+                # Volatility-adjusted interval: range-bound markets scan more frequently,
+                # high-volatility markets scan less frequently to reduce API load
+                _rsi_history = getattr(state.rsi_strategy, 'price_histories', {})
+                _recent_rsi_ranges = []
+                for _pair in state.favorite_pairs:
+                    _hist = _rsi_history.get(_pair, [])
+                    if len(_hist) > 10:
+                        _recent_rsi_ranges.append(max(_hist[-10:]) - min(_hist[-10:]))
+                _avg_rsi_range = sum(_recent_rsi_ranges) / len(_recent_rsi_ranges) if _recent_rsi_ranges else 20
+
+                if _avg_rsi_range <= 15:        # Range-bound
+                    _vol_factor = 0.8           # Narrow interval to 1.6h
+                elif _avg_rsi_range <= 30:     # Moderate
+                    _vol_factor = 1.0           # Standard interval 2h
+                else:                          # High volatility
+                    _vol_factor = 1.3           # Widen interval to 2.6h
+
+                interval_hours = max(0.25, float(getattr(state, "ai_scout_interval_hours", 2.0)) * _vol_factor)
                 interval_sec = interval_hours * 3600.0
                 now = time.time()
 
@@ -44,9 +62,40 @@ async def ai_opportunity_scout_watchdog():
                     logger.info(f"AI Opportunity Scout running scheduled market scan (interval: {interval_hours}h)...")
 
                     market_ctx = state.to_dict()
-                    result = await scan_market_opportunities(market_ctx, state.gemini_api_key, model=state.gemini_model)
+                    
+                    # Extract market regime from indicators for AI context
+                    _indicators = market_ctx.get("indicators", {})
+                    _rsi_vals = []
+                    for _pair, _ind in _indicators.items():
+                        _rsi = _ind.get("rsi", 50)
+                        if isinstance(_rsi, (int, float)):
+                            _rsi_vals.append(_rsi)
+                    _avg_rsi = sum(_rsi_vals) / len(_rsi_vals) if _rsi_vals else 50
+                    if _avg_rsi >= 55:
+                        _market_regime = "BULLISH_GREED"
+                    elif _avg_rsi <= 45:
+                        _market_regime = "BEARISH_FEAR"
+                    else:
+                        _market_regime = "NEUTRAL"
+                    
+                    result = await scan_market_opportunities(market_ctx, state.gemini_api_key, model=state.gemini_model, market_regime=_market_regime)
                     opps = result.get("top_opportunities", [])
-                    min_conf = float(getattr(state, "ai_scout_min_confidence", 0.85))
+                    _min_conf_base = float(getattr(state, "ai_scout_min_confidence", 0.85))
+
+                    # Time-of-day confidence factor
+                    now = time.time()
+                    hour = datetime.datetime.utcfromtimestamp(now).hour
+                    if 0 <= hour < 6:
+                        _time_factor = 0.95   # Asian session — quieter, lower threshold
+                    elif 6 <= hour < 18:
+                        _time_factor = 1.0    # Mixed sessions — standard threshold
+                    else:
+                        _time_factor = 0.9    # US session — higher volatility, lower threshold
+                    min_conf = _min_conf_base * _time_factor
+
+                    # Confidence decay for stale analyses
+                    _age_factor = max(0.0, 1.0 - (now - _last_scout_time) / (interval_hours * 3600.0 + 60))
+                    adjusted_min_conf = min_conf * _age_factor
 
                     evaluated_count = len(opps)
                     trade_staged = False
@@ -57,8 +106,8 @@ async def ai_opportunity_scout_watchdog():
                         conf = float(opp.get("confidence", 0.0))
                         analysis = opp.get("analysis", "")
 
-                        if not pair or conf < min_conf:
-                            logger.info(f"AI Scout: Skipping {pair} ({int(conf*100)}% Conf) - Below {int(min_conf*100)}% threshold.")
+                        if not pair or conf < adjusted_min_conf:
+                            logger.info(f"AI Scout: Skipping {pair} ({int(conf*100)}% Conf) - Below {int(adjusted_min_conf*100)}% threshold (age factor: {_age_factor:.2f}).")
                             continue
 
                         last_sig_time = _scout_cooldowns.get(pair, 0.0)

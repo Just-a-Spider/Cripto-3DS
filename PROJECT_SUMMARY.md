@@ -170,8 +170,8 @@ $$\%B = \frac{\text{Price} - \text{Lower}}{\text{Upper} - \text{Lower}}$$
 ```bash
 rsync -avz --exclude '.venv' --exclude 'bot_data.db' --exclude '__pycache__' --exclude '.pytest_cache' \
   -e "ssh -p 8022" \
-  /home/andre/Desktop/Projects/Cripto-3DS/cripto-bot-engine/ \
-  u0_a277@moto-e20:~/cripto-bot-engine/
+  ./cripto-bot-engine/ \
+  android-server:~/cripto-bot-engine/
 ```
 
 #### 2. Auto-Start Daemon on Phone Boot (`~/.termux/boot/start_cripto.sh`):

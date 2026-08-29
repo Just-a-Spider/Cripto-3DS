@@ -599,7 +599,8 @@ Return JSON with exact keys:
 async def scan_market_opportunities(
     market_context: Dict[str, Any],
     api_key: str,
-    model: str = DEFAULT_GEMINI_MODEL
+    model: str = DEFAULT_GEMINI_MODEL,
+    market_regime: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Scans all watchlist assets to identify top quantitative setups:
@@ -640,11 +641,15 @@ async def scan_market_opportunities(
 
     watchlist_str = "\n".join(lines)
 
+    regime_context = ""
+    if market_regime:
+        regime_context = f"\n- Current market regime: {market_regime}. Adjust setup identification accordingly:"
+
     prompt = f"""
 Analyze this cryptocurrency watchlist and identify top trading opportunities right now:
 - Market Macro: Fear & Greed Index is {fng_str}
 - Live Watchlist Indicators & Positions:
-{watchlist_str}
+{watchlist_str}{regime_context}
 
 Evaluate and rank:
 1. "DIP_BUY": Assets in bull/greed regime undergoing healthy pullbacks (RSI 35-45, %B <= 0.35, bouncing off support).
