@@ -9,12 +9,21 @@ from engine.trades import refresh_cost_bases
 async def trade_timeout_watchdog():
     while True:
         await asyncio.sleep(1)
-        if state.pending_trade:
-            state.pending_trade["timeout_sec"] -= 1
-            if state.pending_trade["timeout_sec"] <= 0:
-                logger.info(f"Pending trade {state.pending_trade['id']} EXPIRED (10m timeout). Auto-cancelling.")
-                await log_trade(state.pending_trade['pair'], state.pending_trade['action'], state.pending_trade['amount_usdt'], state.pending_trade.get('price', 0.0), "EXPIRED_TIMEOUT", is_testnet=state.testnet)
-                state.pending_trade = None
+        if state.pending_trades:
+            expired_ids = []
+            for tid, trade in list(state.pending_trades.items()):
+                trade["timeout_sec"] -= 1
+                if trade["timeout_sec"] <= 0:
+                    expired_ids.append((tid, trade))
+
+            if expired_ids:
+                for tid, trade in expired_ids:
+                    logger.info(f"Pending trade {tid} ({trade.get('pair')}) EXPIRED (timeout). Auto-cancelling.")
+                    await log_trade(
+                        trade['pair'], trade['action'], trade['amount_usdt'],
+                        trade.get('price', 0.0), "EXPIRED_TIMEOUT", is_testnet=state.testnet
+                    )
+                    state.remove_pending_trade(tid)
                 await broadcast_state()
 
 async def cost_basis_watchdog():
@@ -35,7 +44,7 @@ async def ai_opportunity_scout_watchdog():
     logger.info("Started AI Opportunity Scout Watchdog.")
     while True:
         try:
-            if getattr(state, "ai_scout_enabled", True) and state.is_active and state.gemini_api_key and not state.pending_trade:
+            if getattr(state, "ai_scout_enabled", True) and state.is_active and state.gemini_api_key:
                 # Volatility-adjusted interval: range-bound markets scan more frequently,
                 # high-volatility markets scan less frequently to reduce API load
                 _rsi_history = getattr(state.rsi_strategy, 'price_histories', {})
@@ -84,7 +93,7 @@ async def ai_opportunity_scout_watchdog():
 
                     # Time-of-day confidence factor
                     now = time.time()
-                    hour = datetime.datetime.utcfromtimestamp(now).hour
+                    hour = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).hour
                     if 0 <= hour < 6:
                         _time_factor = 0.95   # Asian session — quieter, lower threshold
                     elif 6 <= hour < 18:
@@ -98,7 +107,8 @@ async def ai_opportunity_scout_watchdog():
                     adjusted_min_conf = min_conf * _age_factor
 
                     evaluated_count = len(opps)
-                    trade_staged = False
+                    staged_trades = []
+                    pending_pairs = {t.get("pair") for t in state.pending_trades.values()}
 
                     for opp in opps:
                         pair = opp.get("pair", "")
@@ -108,6 +118,10 @@ async def ai_opportunity_scout_watchdog():
 
                         if not pair or conf < adjusted_min_conf:
                             logger.info(f"AI Scout: Skipping {pair} ({int(conf*100)}% Conf) - Below {int(adjusted_min_conf*100)}% threshold (age factor: {_age_factor:.2f}).")
+                            continue
+
+                        if pair in pending_pairs:
+                            logger.info(f"AI Scout: Skipping {pair} - Already has a pending trade in queue.")
                             continue
 
                         last_sig_time = _scout_cooldowns.get(pair, 0.0)
@@ -150,8 +164,9 @@ async def ai_opportunity_scout_watchdog():
                                 amount_usdt = qty * curr_price
 
                         _scout_cooldowns[pair] = now
-                        state.pending_trade = {
-                            "id": int(now),
+                        trade_id = int(now * 1000) + len(staged_trades)
+                        trade_payload = {
+                            "id": trade_id,
                             "action": action,
                             "pair": pair,
                             "amount_usdt": amount_usdt,
@@ -160,34 +175,41 @@ async def ai_opportunity_scout_watchdog():
                             "reason": f"AI Scout Setup: {stype} ({int(conf*100)}% Conf) - {analysis[:120]}",
                             "created_at": now,
                             "timeout_sec": 600,
-                            "is_ai_scout": True
+                            "is_ai_scout": True,
+                            "confidence": conf,
+                            "setup_type": stype,
+                            "analysis": analysis,
+                            "key_levels": opp.get("key_levels", "")
                         }
+                        state.add_pending_trade(trade_payload)
+                        pending_pairs.add(pair)
+                        staged_trades.append(trade_payload)
+                        logger.info(f"AI Opportunity Scout staged trade: {action} {pair} (Conf: {conf}, ID: {trade_id})")
 
-                        logger.info(f"AI Opportunity Scout generated proposed trade: {action} {pair} (Conf: {conf})")
+                    if staged_trades:
                         await broadcast_state()
-
                         if not risk_manager.require_human_approval:
-                            logger.info(f"AI Scout: Auto-executing trade (approval not required): {action} {pair}")
+                            logger.info(f"AI Scout: Auto-executing {len(staged_trades)} trades (approval not required)...")
                             from engine.trades import decide_trade
-                            result = await decide_trade(approved=True)
-                            logger.info(f"AI Scout auto-execution result: {result.get('status')}")
+                            for st in staged_trades:
+                                result = await decide_trade(approved=True, trade_id=st["id"])
+                                logger.info(f"AI Scout auto-execution result for {st['pair']}: {result.get('status')}")
 
                             from engine.notifier import send_discord_notification
                             cfg = await load_config_item("risk_config") or {}
-                            subject = f"Crypto Bot Alert: AI Scout {action} {pair} Auto-Executed"
-                            body = f"AI Opportunity Scout trade automatically executed ({int(conf*100)}% confidence).\nReason: {analysis}\nStatus: {result.get('status')}"
+                            subject = f"Crypto Bot Alert: AI Scout Auto-Executed {len(staged_trades)} Trades"
+                            body = f"AI Opportunity Scout automatically executed {len(staged_trades)} setups:\n" + "\n".join(
+                                f"• {t['action']} {t['pair']} @ ${t['price']:.4f}" for t in staged_trades
+                            )
                             asyncio.create_task(send_discord_notification(subject, body, cfg))
                         else:
                             from engine.notifier import send_discord_notification
                             cfg = await load_config_item("risk_config") or {}
-                            subject = f"Crypto Bot Alert: AI Scout {action} {pair}"
-                            body = f"AI Opportunity Scout detected a high-probability {stype} setup ({int(conf*100)}% confidence).\nReason: {analysis}"
-                            asyncio.create_task(send_discord_notification(subject, body, cfg, trade=state.pending_trade))
-                        trade_staged = True
-                        break
-
-                    if not trade_staged:
-                        logger.info(f"AI Scout: Completed scan across {evaluated_count} setups. No eligible trades to stage (market overbought / insufficient asset balances).")
+                            subject = f"Crypto Bot Alert: AI Scout Discovered {len(staged_trades)} Setups"
+                            body = f"AI Opportunity Scout detected {len(staged_trades)} high-probability setups requiring authorization."
+                            asyncio.create_task(send_discord_notification(subject, body, cfg, trades=staged_trades))
+                    else:
+                        logger.info(f"AI Scout: Completed scan across {evaluated_count} setups. No eligible trades to stage (market overbought / in cooldown / insufficient balance).")
         except Exception as e:
             logger.error(f"Error in AI Opportunity Scout watchdog: {e}")
 

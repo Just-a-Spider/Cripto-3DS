@@ -973,6 +973,250 @@ async def test_ai_scout_auto_execution_when_approval_disabled(monkeypatch):
     trades = await get_trade_history(limit=5, is_testnet=state.testnet)
     assert any(t["pair"] == "SOLUSDT" and t["status"] == "EXECUTED" for t in trades)
 
+@pytest.mark.asyncio
+async def test_multi_pending_trades_state():
+    from engine.state import state
+    state.clear_pending_trades()
+    assert state.pending_trade is None
+    assert len(state.pending_trades) == 0
+
+    t1 = {"id": 101, "pair": "BTCUSDT", "action": "BUY", "price": 64000.0, "amount_usdt": 10.0}
+    t2 = {"id": 102, "pair": "ETHUSDT", "action": "BUY", "price": 3400.0, "amount_usdt": 10.0}
+    
+    state.add_pending_trade(t1)
+    state.add_pending_trade(t2)
+
+    assert len(state.pending_trades) == 2
+    assert state.get_pending_trade(101) == t1
+    assert state.get_pending_trade(102) == t2
+    assert state.pending_trade is not None # First pending trade
+    
+    # State dict includes both
+    d = state.to_dict()
+    assert len(d["pending_trades"]) == 2
+    assert d["pending_trade"] is not None
+
+    # Removal
+    removed = state.remove_pending_trade(101)
+    assert removed == t1
+    assert len(state.pending_trades) == 1
+    assert state.get_pending_trade(101) is None
+    assert state.get_pending_trade(102) == t2
+
+    # Setting pending_trade = None clears all
+    state.pending_trade = None
+    assert len(state.pending_trades) == 0
+
+@pytest.mark.asyncio
+async def test_decide_trade_by_id_and_pair():
+    from engine.state import state
+    from engine.trades import decide_trade
+    from engine.risk_manager import risk_manager
+
+    risk_manager.max_trade_usdt = 100.0
+    risk_manager.max_daily_spend_usdt = 500.0
+    risk_manager.daily_spent = 0.0
+
+    state.clear_pending_trades()
+    state.usdt_balance = 1000.0
+    state.prices["BTCUSDT"] = 64000.0
+    state.prices["ETHUSDT"] = 3400.0
+    state.prices["SOLUSDT"] = 150.0
+
+    t1 = {"id": 201, "pair": "BTCUSDT", "action": "BUY", "price": 64000.0, "amount_usdt": 10.0, "amount_asset": 10.0/64000.0, "reason": "Test BTC"}
+    t2 = {"id": 202, "pair": "ETHUSDT", "action": "BUY", "price": 3400.0, "amount_usdt": 10.0, "amount_asset": 10.0/3400.0, "reason": "Test ETH"}
+    t3 = {"id": 203, "pair": "SOLUSDT", "action": "BUY", "price": 150.0, "amount_usdt": 10.0, "amount_asset": 10.0/150.0, "reason": "Test SOL"}
+
+    state.add_pending_trade(t1)
+    state.add_pending_trade(t2)
+    state.add_pending_trade(t3)
+    assert len(state.pending_trades) == 3
+
+    # Approve ETH by trade_id
+    res_eth = await decide_trade(approved=True, trade_id=202)
+    assert res_eth["status"] == "approved"
+    assert len(state.pending_trades) == 2
+    assert 202 not in state.pending_trades
+    assert 201 in state.pending_trades
+    assert 203 in state.pending_trades
+
+    # Reject SOL by pair
+    res_sol = await decide_trade(approved=False, pair="SOLUSDT")
+    assert res_sol["status"] == "rejected"
+    assert len(state.pending_trades) == 1
+    assert 203 not in state.pending_trades
+    assert 201 in state.pending_trades # BTC still pending!
+
+    # Approve remaining BTC
+    res_btc = await decide_trade(approved=True)
+    assert res_btc["status"] == "approved"
+    assert len(state.pending_trades) == 0
+
+@pytest.mark.asyncio
+async def test_decide_all_trades_batch():
+    from engine.state import state
+    from engine.trades import decide_all_trades
+    from engine.risk_manager import risk_manager
+
+    risk_manager.max_trade_usdt = 100.0
+    risk_manager.max_daily_spend_usdt = 500.0
+    risk_manager.daily_spent = 0.0
+
+    state.clear_pending_trades()
+    state.usdt_balance = 1000.0
+    state.prices["BTCUSDT"] = 64000.0
+    state.prices["ETHUSDT"] = 3400.0
+
+    t1 = {"id": 301, "pair": "BTCUSDT", "action": "BUY", "price": 64000.0, "amount_usdt": 10.0, "amount_asset": 10.0/64000.0, "reason": "Batch BTC"}
+    t2 = {"id": 302, "pair": "ETHUSDT", "action": "BUY", "price": 3400.0, "amount_usdt": 10.0, "amount_asset": 10.0/3400.0, "reason": "Batch ETH"}
+
+    state.add_pending_trade(t1)
+    state.add_pending_trade(t2)
+    assert len(state.pending_trades) == 2
+
+    results = await decide_all_trades(approved=True)
+    assert len(results) == 2
+    assert all(r["status"] == "approved" for r in results)
+    assert len(state.pending_trades) == 0
+
+@pytest.mark.asyncio
+async def test_api_decide_all_and_by_id_endpoints():
+    from engine.state import state
+    from engine.risk_manager import risk_manager
+
+    risk_manager.max_trade_usdt = 100.0
+    risk_manager.max_daily_spend_usdt = 500.0
+    risk_manager.daily_spent = 0.0
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        state.clear_pending_trades()
+        # Simulate 2 trades
+        resp = await ac.post("/api/trade/simulate?count=2")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["pending_trades"]) == 2
+        assert len(state.pending_trades) == 2
+
+        t1 = data["pending_trades"][0]
+        t2 = data["pending_trades"][1]
+
+        # Decide individual trade by trade_id
+        resp1 = await ac.post(f"/api/trade/decide?approved=true&trade_id={t1['id']}")
+        assert resp1.status_code == 200
+        assert resp1.json()["status"] == "approved"
+        assert len(state.pending_trades) == 1
+
+        # Decide all remaining trades
+        resp_all = await ac.post("/api/trade/decide_all?approved=false")
+        assert resp_all.status_code == 200
+        res_data = resp_all.json()
+        assert res_data["status"] == "ok"
+        assert len(res_data["results"]) == 1
+        assert res_data["results"][0]["status"] == "rejected"
+        assert len(state.pending_trades) == 0
+
+@pytest.mark.asyncio
+async def test_ai_scout_parallel_multi_asset_staging(monkeypatch):
+    import asyncio
+    from engine.state import state
+    from engine.risk_manager import risk_manager
+    import engine.watchdogs as wd_mod
+
+    risk_manager.require_human_approval = True
+    state.is_active = True
+    state.gemini_api_key = "valid_key"
+    state.clear_pending_trades()
+    state.prices["BTCUSDT"] = 64000.0
+    state.prices["ETHUSDT"] = 3400.0
+    state.prices["SOLUSDT"] = 150.0
+    state.usdt_balance = 1000.0
+    state.ai_scout_enabled = True
+    state.ai_scout_interval_hours = 1.0
+    state.ai_scout_min_confidence = 0.80
+    wd_mod._last_scout_time = 0.0
+    wd_mod._scout_cooldowns.clear()
+
+    async def mock_scan(ctx, api_key, model=None, market_regime=None):
+        return {
+            "market_regime": "BULLISH_GREED",
+            "top_opportunities": [
+                {
+                    "pair": "BTCUSDT",
+                    "setup_type": "DIP_BUY",
+                    "confidence": 0.92,
+                    "key_levels": "Support: $63,500",
+                    "analysis": "High-volume bounce off 200 EMA."
+                },
+                {
+                    "pair": "ETHUSDT",
+                    "setup_type": "BREAKOUT",
+                    "confidence": 0.88,
+                    "key_levels": "Resistance: $3,500",
+                    "analysis": "Ascending triangle breakout confirmation."
+                },
+                {
+                    "pair": "SOLUSDT",
+                    "setup_type": "DIP_BUY",
+                    "confidence": 0.85,
+                    "key_levels": "Support: $145",
+                    "analysis": "Oversold RSI recovery."
+                }
+            ]
+        }
+
+    monkeypatch.setattr(wd_mod, "scan_market_opportunities", mock_scan)
+
+    task = asyncio.create_task(wd_mod.ai_opportunity_scout_watchdog())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    # All 3 qualified opportunities must be staged in parallel!
+    assert len(state.pending_trades) == 3
+    staged_pairs = {t["pair"] for t in state.pending_trades.values()}
+    assert "BTCUSDT" in staged_pairs
+    assert "ETHUSDT" in staged_pairs
+    assert "SOLUSDT" in staged_pairs
+
+@pytest.mark.asyncio
+async def test_discord_multi_trade_embed_and_view():
+    from engine.notifier import build_multi_trade_embed, BatchTradeApprovalView
+
+    trades = [
+        {"id": 401, "pair": "BTCUSDT", "action": "BUY", "price": 64200.0, "amount_usdt": 10.0, "ai_risk": "LOW (2/10)", "reason": "Oversold RSI"},
+        {"id": 402, "pair": "ETHUSDT", "action": "BUY", "price": 3450.0, "amount_usdt": 10.0, "ai_risk": "MED (5/10)", "reason": "Breakout"},
+        {"id": 403, "pair": "SOLUSDT", "action": "SELL", "price": 148.0, "amount_usdt": 10.0, "ai_risk": "LOW (1/10)", "reason": "Take Profit"}
+    ]
+
+    embed = build_multi_trade_embed(trades)
+    assert embed is not None
+    assert "Trade Confirmations Required" in embed.title
+    assert any("Signals Overview Table" in f.name for f in embed.fields)
+
+    # Test view components
+    view = BatchTradeApprovalView(trades=trades, timeout=600)
+    assert view is not None
+    # For 3 trades, check select menus exist
+    custom_ids = [getattr(c, "custom_id", "") for c in view.children]
+    assert "batch_approve_all" in custom_ids
+    assert "batch_reject_all" in custom_ids
+    assert "select_approve" in custom_ids
+    assert "select_reject" in custom_ids
+
+    # Test resolution embed update
+    resolutions = {
+        401: {"status": "approved", "order_id": "ORD123"},
+        402: {"status": "rejected", "reason": "Manual rejection"},
+        403: {"status": "approved", "order_id": "ORD124"}
+    }
+    resolved_embed = build_multi_trade_embed(trades, resolutions)
+    assert resolved_embed is not None
+    assert "Batch Trades Resolved" in resolved_embed.title
+
+
 
 
 

@@ -1,7 +1,7 @@
 import os
 import base64
 from cryptography.fernet import Fernet
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from binance import AsyncClient
 from dotenv import load_dotenv
 
@@ -71,7 +71,7 @@ class BotState:
         self.usdt_balance: float = 1000.0
         self.portfolio_balances: Dict[str, float] = {}
         self.current_pair_idx: int = 0
-        self.pending_trade: Dict[str, Any] = None
+        self.pending_trades: Dict[int, Dict[str, Any]] = {}
         self.binance_client: AsyncClient = None
         self.auth_pin: str = "1234"
         self.api_key: str = ""
@@ -95,6 +95,42 @@ class BotState:
         self.ai_scout_enabled: bool = True
         self.ai_scout_interval_hours: float = 2.0
         self.ai_scout_min_confidence: float = 0.85
+
+    @property
+    def pending_trade(self) -> Optional[Dict[str, Any]]:
+        if not self.pending_trades:
+            return None
+        return next(iter(self.pending_trades.values()))
+
+    @pending_trade.setter
+    def pending_trade(self, value: Optional[Dict[str, Any]]):
+        if value is None:
+            self.pending_trades.clear()
+        else:
+            trade_id = value.get("id")
+            if trade_id is None:
+                import time
+                trade_id = int(time.time())
+                value["id"] = trade_id
+            self.pending_trades[trade_id] = value
+
+    def add_pending_trade(self, trade: Dict[str, Any]) -> int:
+        trade_id = trade.get("id")
+        if trade_id is None:
+            import time
+            trade_id = int(time.time() * 1000)
+            trade["id"] = trade_id
+        self.pending_trades[trade_id] = trade
+        return trade_id
+
+    def get_pending_trade(self, trade_id: int) -> Optional[Dict[str, Any]]:
+        return self.pending_trades.get(trade_id)
+
+    def remove_pending_trade(self, trade_id: int) -> Optional[Dict[str, Any]]:
+        return self.pending_trades.pop(trade_id, None)
+
+    def clear_pending_trades(self):
+        self.pending_trades.clear()
 
     def sync_favorite_prices(self):
         for pair in self.favorite_pairs:
@@ -124,6 +160,7 @@ class BotState:
             "favorite_pairs": self.favorite_pairs,
             "current_pair": self.favorite_pairs[self.current_pair_idx] if self.favorite_pairs else "BTCUSDT",
             "pending_trade": self.pending_trade,
+            "pending_trades": list(self.pending_trades.values()),
             "risk_config": {
                 "max_trade_usdt": risk_manager.max_trade_usdt,
                 "max_daily_spend_usdt": risk_manager.max_daily_spend_usdt,

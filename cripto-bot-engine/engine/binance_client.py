@@ -39,7 +39,7 @@ async def listen_market_data(bm):
                     if symbol in state.favorite_pairs:
                         state.prices[symbol] = close_price
                         
-                        if state.is_active and not state.pending_trade:
+                        if state.is_active and symbol not in [t.get('pair') for t in state.pending_trades.values()]:
                             tpsl_sig = state.tpsl_strategy.evaluate_tpsl(state.prices, state.portfolio_balances, state.cost_bases, state.signal_cooldown_hours)
                             
                             sig = tpsl_sig
@@ -64,8 +64,9 @@ async def listen_market_data(bm):
                                 if sig['action'] == 'SELL':
                                     amount_usdt = amount_asset * sig['price']
                                     
-                                state.pending_trade = {
-                                    "id": int(time.time()),
+                                trade_id = int(time.time() * 1000)
+                                trade_payload = {
+                                    "id": trade_id,
                                     "action": sig["action"],
                                     "pair": sig["pair"],
                                     "amount_usdt": amount_usdt,
@@ -75,13 +76,14 @@ async def listen_market_data(bm):
                                     "created_at": time.time(),
                                     "timeout_sec": 600
                                 }
-                                logger.info(f"Strategy signal generated: {sig}")
+                                state.add_pending_trade(trade_payload)
+                                logger.info(f"Strategy signal generated: {sig} (ID: {trade_id})")
                                 await save_strategy_state()
 
                                 if not risk_manager.require_human_approval:
                                     logger.info(f"Auto-executing trade (approval not required): {sig['action']} {sig['pair']}")
                                     from engine.trades import decide_trade
-                                    result = await decide_trade(approved=True)
+                                    result = await decide_trade(approved=True, trade_id=trade_id)
                                     logger.info(f"Auto-execution result: {result.get('status')}")
 
                                     from engine.notifier import send_discord_notification
@@ -94,7 +96,7 @@ async def listen_market_data(bm):
                                     cfg = await load_config_item("risk_config") or {}
                                     subject = f"Crypto Bot Alert: {sig['action']} {sig['pair']}"
                                     body = f"A new {sig['action']} signal for {sig['pair']} requires your approval.\nPrice: {sig['price']}\nReason: {sig.get('reason', sig.get('strategy'))}"
-                                    asyncio.create_task(send_discord_notification(subject, body, cfg, trade=state.pending_trade))
+                                    asyncio.create_task(send_discord_notification(subject, body, cfg, trade=trade_payload))
 
                         await broadcast_state()
     except Exception as e:

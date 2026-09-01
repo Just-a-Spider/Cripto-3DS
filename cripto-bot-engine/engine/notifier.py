@@ -47,52 +47,296 @@ def build_briefing_embed(data: dict, model_name: str) -> Optional[Any]:
     embed.set_footer(text=f"Model: {model_name} • Google AI Studio • Cripto-3DS Engine")
     return embed
 
-class TradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
-    def __init__(self, trade_id: int, timeout: float = 600):
+def build_multi_trade_embed(trades: list, resolutions: dict = None) -> Optional[Any]:
+    if not HAS_DISCORD_PY:
+        return None
+    resolutions = resolutions or {}
+    total = len(trades)
+    pending_count = sum(1 for t in trades if t.get("id") not in resolutions)
+    approved_count = sum(1 for r in resolutions.values() if r.get("status") == "approved")
+    rejected_count = sum(1 for r in resolutions.values() if r.get("status") in ("rejected", "blocked"))
+
+    if pending_count == 0:
+        if approved_count > 0 and rejected_count == 0:
+            color = 0x50fa7b # All Approved (Green)
+            title = f"✅ All Trades Processed ({approved_count}/{total} Approved)"
+        elif rejected_count > 0 and approved_count == 0:
+            color = 0xff5555 # All Rejected (Red)
+            title = f"❌ All Trades Rejected ({rejected_count}/{total} Rejected)"
+        else:
+            color = 0x8be9fd # Mixed (Cyan)
+            title = f"📊 Batch Trades Resolved ({approved_count} Approved, {rejected_count} Rejected)"
+    else:
+        color = 0xbd93f9 # Active Purple
+        title = f"🚨 Trade Confirmations Required ({pending_count}/{total} Pending)"
+
+    embed = discord.Embed(
+        title=title,
+        color=color,
+        description="**Multi-Asset Signal Pipeline • Table & Quick Actions**"
+    )
+
+    # Formatted ASCII/Markdown table
+    table_lines = [
+        "```",
+        f"{'Pair':<10} {'Act':<5} {'Price':<11} {'Size':<8} {'Risk':<8} {'Status':<10}",
+        "─" * 58
+    ]
+    for t in trades:
+        tid = t.get("id")
+        pair = t.get("pair", "")[:9]
+        act = t.get("action", "BUY")[:4]
+        price_str = f"${t.get('price', 0.0):,.2f}"[:10]
+        size_str = f"${t.get('amount_usdt', 0.0):.0f}"[:7]
+        
+        risk_str = str(t.get("ai_risk", "MED")).split(" ")[0][:7]
+        if not risk_str or risk_str == "N/A":
+            risk_str = "MED"
+
+        if tid in resolutions:
+            res = resolutions[tid]
+            if res.get("status") == "approved":
+                status_str = "APPROVED"
+            else:
+                status_str = "REJECTED"
+        else:
+            status_str = "PENDING"
+
+        table_lines.append(f"{pair:<10} {act:<5} {price_str:<11} {size_str:<8} {risk_str:<8} {status_str:<10}")
+    table_lines.append("```")
+    embed.add_field(name="📋 Signals Overview Table", value="\n".join(table_lines), inline=False)
+
+    # Detailed breakdown per asset
+    for t in trades:
+        tid = t.get("id")
+        pair = t.get("pair", "")
+        act = t.get("action", "BUY")
+        price = t.get("price", 0.0)
+        amount_usdt = t.get("amount_usdt", 0.0)
+        reason = t.get("reason", "Strategy Signal")
+        timeout_sec = t.get("timeout_sec", 600)
+        created_at = t.get("created_at", time.time())
+        exp_ts = int(created_at + timeout_sec)
+
+        v_emoji = "🟢" if act == "BUY" else "🔴"
+        ai_verdict = t.get("ai_verdict", "")
+        ai_risk = t.get("ai_risk", "")
+        ai_summary = t.get("ai_summary", "") or t.get("analysis", "")
+        ai_sl = t.get("ai_sl", "")
+
+        field_name = f"{v_emoji} {act} {pair} • ${price:,.4f} (${amount_usdt:.2f} USDT)"
+        
+        lines = []
+        if tid in resolutions:
+            res = resolutions[tid]
+            if res.get("status") == "approved":
+                oid = f" (Order: `{res.get('order_id')}`)" if res.get("order_id") else ""
+                lines.append(f"**Status:** ✅ **APPROVED**{oid}")
+            else:
+                r_text = f" ({res.get('reason')})" if res.get('reason') else ""
+                lines.append(f"**Status:** ❌ **REJECTED**{r_text}")
+        else:
+            lines.append(f"**Status:** ⏳ **PENDING** • **Expires:** <t:{exp_ts}:R>")
+
+        lines.append(f"**Reason:** {reason}")
+        if ai_verdict:
+            sl_info = f" • **Suggested SL:** `-{ai_sl}%`" if ai_sl else ""
+            lines.append(f"🤖 **AI Analysis:** `{ai_verdict}` • **Risk:** `{ai_risk}`{sl_info}")
+            if ai_summary:
+                lines.append(f"💡 *{ai_summary[:180]}*")
+
+        embed.add_field(name=field_name, value="\n".join(lines), inline=False)
+
+    embed.set_footer(text="Cripto-3DS Engine • Use Quick Buttons or Select Dropdown Below")
+    return embed
+
+class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
+    def __init__(self, trades: list, timeout: float = 600):
         if HAS_DISCORD_PY:
             super().__init__(timeout=timeout)
-        self.trade_id = trade_id
+        self.trades = trades
+        self.resolutions = {}
         self.message = None
+        if HAS_DISCORD_PY:
+            self._build_components()
 
-    if HAS_DISCORD_PY:
-        @discord.ui.button(label="Approve", style=discord.ButtonStyle.success, emoji="✅")
-        async def approve_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    def _build_components(self):
+        self.clear_items()
+        unresolved = [t for t in self.trades if t.get("id") not in self.resolutions]
+        if not unresolved:
+            return
+
+        # Row 0: Quick Action Buttons (Approve All / Reject All)
+        btn_approve_all = discord.ui.Button(
+            label=f"Approve All ({len(unresolved)})",
+            style=discord.ButtonStyle.success,
+            emoji="✅",
+            row=0,
+            custom_id="batch_approve_all"
+        )
+        btn_approve_all.callback = self.approve_all_callback
+        self.add_item(btn_approve_all)
+
+        btn_reject_all = discord.ui.Button(
+            label=f"Reject All ({len(unresolved)})",
+            style=discord.ButtonStyle.danger,
+            emoji="❌",
+            row=0,
+            custom_id="batch_reject_all"
+        )
+        btn_reject_all.callback = self.reject_all_callback
+        self.add_item(btn_reject_all)
+
+        # Per-Asset Controls
+        if len(self.trades) <= 2:
+            # 1 or 2 trades: Individual buttons per asset
+            row_idx = 1
+            for t in unresolved:
+                tid = t.get("id")
+                pair = t.get("pair", "")
+
+                btn_app = discord.ui.Button(
+                    label=f"Approve {pair}",
+                    style=discord.ButtonStyle.success,
+                    emoji="✔",
+                    row=row_idx,
+                    custom_id=f"app_{tid}"
+                )
+                btn_app.callback = self._make_single_callback(tid, True)
+                self.add_item(btn_app)
+
+                btn_rej = discord.ui.Button(
+                    label=f"Reject {pair}",
+                    style=discord.ButtonStyle.secondary,
+                    emoji="✖",
+                    row=row_idx,
+                    custom_id=f"rej_{tid}"
+                )
+                btn_rej.callback = self._make_single_callback(tid, False)
+                self.add_item(btn_rej)
+                row_idx += 1
+        else:
+            # >= 3 trades: StringSelect dropdowns
+            app_options = [
+                discord.SelectOption(
+                    label=f"Approve {t.get('pair')}",
+                    value=str(t.get('id')),
+                    description=f"{t.get('action')} @ ${t.get('price', 0):,.2f} (${t.get('amount_usdt', 0):.0f} USDT)",
+                    emoji="✅"
+                ) for t in unresolved[:25]
+            ]
+            if app_options:
+                select_app = discord.ui.Select(
+                    placeholder="✅ Select asset(s) to APPROVE...",
+                    min_values=1,
+                    max_values=len(app_options),
+                    options=app_options,
+                    row=1,
+                    custom_id="select_approve"
+                )
+                select_app.callback = self.select_approve_callback
+                self.add_item(select_app)
+
+            rej_options = [
+                discord.SelectOption(
+                    label=f"Reject {t.get('pair')}",
+                    value=str(t.get('id')),
+                    description=f"{t.get('action')} @ ${t.get('price', 0):,.2f}",
+                    emoji="❌"
+                ) for t in unresolved[:25]
+            ]
+            if rej_options:
+                select_rej = discord.ui.Select(
+                    placeholder="❌ Select asset(s) to REJECT...",
+                    min_values=1,
+                    max_values=len(rej_options),
+                    options=rej_options,
+                    row=2,
+                    custom_id="select_reject"
+                )
+                select_rej.callback = self.select_reject_callback
+                self.add_item(select_rej)
+
+    def _make_single_callback(self, trade_id: int, approved: bool):
+        async def cb(interaction: discord.Interaction):
             from engine.trades import decide_trade
             await interaction.response.defer()
-            res = await decide_trade(approved=True)
-            
-            for child in self.children:
-                child.disabled = True
-            
-            status_text = "APPROVED" if res.get("status") == "approved" else f"BLOCKED: {res.get('reason', 'Unknown')}"
-            order_info = f" (Order ID: `{res.get('order_id')}`)" if res.get("order_id") else ""
-            await interaction.message.edit(
-                content=f"✅ Trade **{status_text}** by {interaction.user.mention}{order_info}",
-                view=self
-            )
+            res = await decide_trade(approved=approved, trade_id=trade_id)
+            self.resolutions[trade_id] = res
+            self._build_components()
+            embed = build_multi_trade_embed(self.trades, self.resolutions)
+            await interaction.message.edit(embed=embed, view=self)
+        return cb
 
-        @discord.ui.button(label="Reject", style=discord.ButtonStyle.danger, emoji="❌")
-        async def reject_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-            from engine.trades import decide_trade
-            await interaction.response.defer()
-            await decide_trade(approved=False)
-            
-            for child in self.children:
-                child.disabled = True
-                
-            await interaction.message.edit(
-                content=f"❌ Trade **REJECTED** by {interaction.user.mention}",
-                view=self
-            )
+    async def approve_all_callback(self, interaction: discord.Interaction):
+        from engine.trades import decide_trade
+        await interaction.response.defer()
+        unresolved = [t for t in self.trades if t.get("id") not in self.resolutions]
+        for t in unresolved:
+            tid = t.get("id")
+            res = await decide_trade(approved=True, trade_id=tid)
+            self.resolutions[tid] = res
+        self._build_components()
+        embed = build_multi_trade_embed(self.trades, self.resolutions)
+        await interaction.message.edit(embed=embed, view=self)
 
-        async def on_timeout(self):
-            for child in self.children:
-                child.disabled = True
-            if self.message:
-                try:
-                    await self.message.edit(content="⏰ **Trade approval request expired.**", view=self)
-                except Exception:
-                    pass
+    async def reject_all_callback(self, interaction: discord.Interaction):
+        from engine.trades import decide_trade
+        await interaction.response.defer()
+        unresolved = [t for t in self.trades if t.get("id") not in self.resolutions]
+        for t in unresolved:
+            tid = t.get("id")
+            res = await decide_trade(approved=False, trade_id=tid)
+            self.resolutions[tid] = res
+        self._build_components()
+        embed = build_multi_trade_embed(self.trades, self.resolutions)
+        await interaction.message.edit(embed=embed, view=self)
+
+    async def select_approve_callback(self, interaction: discord.Interaction):
+        from engine.trades import decide_trade
+        await interaction.response.defer()
+        values = interaction.data.get("values", [])
+        for val in values:
+            try:
+                tid = int(val)
+                res = await decide_trade(approved=True, trade_id=tid)
+                self.resolutions[tid] = res
+            except Exception:
+                pass
+        self._build_components()
+        embed = build_multi_trade_embed(self.trades, self.resolutions)
+        await interaction.message.edit(embed=embed, view=self)
+
+    async def select_reject_callback(self, interaction: discord.Interaction):
+        from engine.trades import decide_trade
+        await interaction.response.defer()
+        values = interaction.data.get("values", [])
+        for val in values:
+            try:
+                tid = int(val)
+                res = await decide_trade(approved=False, trade_id=tid)
+                self.resolutions[tid] = res
+            except Exception:
+                pass
+        self._build_components()
+        embed = build_multi_trade_embed(self.trades, self.resolutions)
+        await interaction.message.edit(embed=embed, view=self)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message:
+            try:
+                embed = build_multi_trade_embed(self.trades, self.resolutions)
+                await self.message.edit(content="⏰ **Trade approval request expired.**", embed=embed, view=self)
+            except Exception:
+                pass
+
+class TradeApprovalView(BatchTradeApprovalView):
+    def __init__(self, trade_id: int, timeout: float = 600):
+        # Backward compatibility wrapper for single trade
+        trade = {"id": trade_id, "pair": "TRADE", "action": "BUY", "price": 0.0, "amount_usdt": 0.0, "reason": "Trade Signal", "timeout_sec": timeout}
+        super().__init__(trades=[trade], timeout=timeout)
 
 class DiscordBotService:
     def __init__(self):
@@ -222,26 +466,38 @@ class DiscordBotService:
             state.tpsl_strategy.cooldowns.clear()
             await interaction.response.send_message("🔄 Cooldown timers cleared. Evaluating market now.")
 
-        @self.tree.command(name="testbuy", description="Simulate a test trade approval card")
-        async def cmd_testbuy(interaction: discord.Interaction):
+        @self.tree.command(name="testbuy", description="Simulate a test trade approval card (single or multi-asset)")
+        @app_commands.describe(count="Number of simulated asset signals to test (1 to 4)")
+        async def cmd_testbuy(interaction: discord.Interaction, count: int = 1):
             from engine.state import state
             from engine.risk_manager import risk_manager
             from engine.ws_manager import broadcast_state
             await interaction.response.defer()
-            curr_price = state.prices.get("BTCUSDT", 0.0) or 64000.0
-            state.pending_trade = {
-                "id": int(time.time()),
-                "action": "BUY",
-                "pair": "BTCUSDT",
-                "amount_usdt": risk_manager.max_trade_usdt,
-                "price": curr_price,
-                "reason": "Simulated Discord /testbuy",
-                "created_at": time.time(),
-                "timeout_sec": 600
-            }
+            
+            count = max(1, min(4, count))
+            test_pairs = state.favorite_pairs[:count] or ["BTCUSDT", "ETHUSDT"][:count]
+            now = time.time()
+            staged = []
+            for i, p in enumerate(test_pairs):
+                curr_price = state.prices.get(p, 0.0) or (64000.0 if "BTC" in p else (3400.0 if "ETH" in p else 150.0))
+                trade_id = int(now * 1000) + i
+                t = {
+                    "id": trade_id,
+                    "action": "BUY" if i % 2 == 0 else "SELL",
+                    "pair": p,
+                    "amount_usdt": risk_manager.max_trade_usdt,
+                    "amount_asset": risk_manager.max_trade_usdt / curr_price,
+                    "price": curr_price,
+                    "reason": f"Simulated Discord /testbuy ({p})",
+                    "created_at": now,
+                    "timeout_sec": 600
+                }
+                state.add_pending_trade(t)
+                staged.append(t)
+
             await broadcast_state()
-            await self.send_interactive_trade(state.pending_trade)
-            await interaction.followup.send("🚨 Test trade approval card dispatched below.")
+            await self.send_interactive_trades(staged)
+            await interaction.followup.send(f"🚨 Dispatched {len(staged)} test trade signal(s) in table below.")
 
         @self.tree.command(name="chart", description="Generate a dark-theme candlestick chart with RSI and Bollinger Bands")
         @app_commands.describe(pair="Trading pair symbol (e.g. BTC, ETH, XRPUSDT)", interval="Candlestick interval (15m, 1h, 2h, 4h, 6h, 8h, 12h, 1d)")
@@ -525,8 +781,8 @@ class DiscordBotService:
             self.bot_task = None
         self.client = None
 
-    async def send_interactive_trade(self, trade: dict) -> bool:
-        if not HAS_DISCORD_PY:
+    async def send_interactive_trades(self, trades: list) -> bool:
+        if not HAS_DISCORD_PY or not trades:
             return False
 
         from engine.state import state
@@ -559,109 +815,62 @@ class DiscordBotService:
                 logger.warning(f"Discord channel {clean_channel_id} not found.")
                 return False
 
-            action = trade.get("action", "BUY")
-            pair = trade.get("pair", "BTCUSDT")
-            price = trade.get("price", 0.0)
-            amount_usdt = trade.get("amount_usdt", 0.0)
-            reason = trade.get("reason", "Strategy Signal")
-            timeout_sec = trade.get("timeout_sec", 600)
-
-            is_partial = trade.get("is_partial_tp", False)
-            if is_partial:
-                color = 0xf1fa8c # Gold / Yellow for Take Profit
-                embed = discord.Embed(
-                    title=f"💰 Partial Take Profit (TP1): SELL {pair}",
-                    description=f"**Reason:** {reason}\n*(Securing 50% profit; remaining position moves to Breakeven Stop & Trailing Runner)*",
-                    color=color
-                )
-            else:
-                color = 0x50fa7b if action == "BUY" else 0xff5555
-                embed = discord.Embed(
-                    title=f"🚨 Trade Confirmation Required: {action} {pair}",
-                    description=f"**Reason:** {reason}",
-                    color=color
-                )
-            embed.add_field(name="Price", value=f"${price:,.4f}", inline=True)
-            embed.add_field(name="Amount", value=f"${amount_usdt:.2f} USDT", inline=True)
-            embed.add_field(name="Auto-Expires", value=f"<t:{int(time.time() + timeout_sec)}:R>", inline=True)
-
+            # Run AI analysis across all trades concurrently if Gemini API key is configured
             if state.gemini_api_key:
                 from engine.ai_analyst import analyze_trade_signal
                 from engine.strategies import calculate_bollinger_bands
-                rsi_val = state.rsi_strategy.calculate_rsi(pair)
-                hist = state.rsi_strategy.price_histories.get(pair, [])
-                _, _, _, pct_b = calculate_bollinger_bands(hist, 20, 2.0)
-                ai_data = await analyze_trade_signal(
-                    pair=pair,
-                    action=action,
-                    price=price,
-                    rsi=rsi_val,
-                    pct_b=pct_b,
-                    reason=reason,
-                    price_history=hist,
-                    api_key=state.gemini_api_key,
-                    model=state.gemini_model
-                )
-                if isinstance(ai_data, dict):
-                    verdict = ai_data.get("verdict", "CAUTION")
-                    risk_score = ai_data.get("risk_score", 5)
-                    sl_pct = ai_data.get("suggested_sl_percent", 3.0)
-                    summary = ai_data.get("summary", "")
-                    flags = ai_data.get("red_flags", [])
-                    fng_v = ai_data.get("fng_index", 50)
-                    fng_c = ai_data.get("fng_classification", "Neutral")
 
-                    v_emoji = "🟢" if verdict == "APPROVE" else ("🟡" if verdict == "CAUTION" else "🔴")
-                    risk_label = "LOW" if risk_score <= 3 else ("MEDIUM" if risk_score <= 6 else "HIGH")
-                    
-                    # Dynamically override embed color and title to match AI risk assessment
-                    if verdict == "HIGH_RISK" or risk_score >= 7:
-                        embed.color = discord.Color(0xff5555) # Red
-                        embed.title = f"🚨 HIGH RISK Trade Confirmation: {action} {pair}"
-                    elif verdict == "CAUTION" or risk_score >= 4:
-                        embed.color = discord.Color(0xffb86c) # Amber / Orange
-                        embed.title = f"⚠️ Trade Confirmation (Caution): {action} {pair}"
-                    elif verdict == "APPROVE":
-                        embed.color = discord.Color(0x50fa7b) # Green
-                        embed.title = f"✅ Trade Confirmation: {action} {pair}"
+                async def _analyze_trade(t):
+                    if t.get("ai_verdict"):
+                        return
+                    pair = t.get("pair", "BTCUSDT")
+                    rsi_val = state.rsi_strategy.calculate_rsi(pair)
+                    hist = state.rsi_strategy.price_histories.get(pair, [])
+                    _, _, _, pct_b = calculate_bollinger_bands(hist, 20, 2.0)
+                    ai_data = await analyze_trade_signal(
+                        pair=pair,
+                        action=t.get("action", "BUY"),
+                        price=t.get("price", 0.0),
+                        rsi=rsi_val,
+                        pct_b=pct_b,
+                        reason=t.get("reason", ""),
+                        price_history=hist,
+                        api_key=state.gemini_api_key,
+                        model=state.gemini_model
+                    )
+                    if isinstance(ai_data, dict):
+                        verdict = ai_data.get("verdict", "CAUTION")
+                        risk_score = ai_data.get("risk_score", 5)
+                        risk_label = "LOW" if risk_score <= 3 else ("MEDIUM" if risk_score <= 6 else "HIGH")
+                        t["ai_verdict"] = verdict
+                        t["ai_risk"] = f"{risk_label} ({risk_score}/10)"
+                        t["ai_sl"] = ai_data.get("suggested_sl_percent", 3.0)
+                        t["ai_summary"] = ai_data.get("summary", "")
+                        t["fng"] = f"{ai_data.get('fng_index', 50)}/100 ({ai_data.get('fng_classification', 'Neutral')})"
+                        t["red_flags"] = ai_data.get("red_flags", [])
 
-                    trade["ai_verdict"] = verdict
-                    trade["ai_risk"] = f"{risk_label} ({risk_score}/10)"
-                    trade["ai_sl"] = sl_pct
-                    if state.pending_trade:
-                        state.pending_trade["ai_verdict"] = trade["ai_verdict"]
-                        state.pending_trade["ai_risk"] = trade["ai_risk"]
+                await asyncio.gather(*[_analyze_trade(t) for t in trades], return_exceptions=True)
 
-                    lines = [
-                        f"{v_emoji} **Verdict:** `{verdict}` • **Risk:** `{risk_score}/10 ({risk_label})` • **Suggested SL:** `-{sl_pct}%`",
-                        f"📊 **Macro:** Fear & Greed Index `{fng_v}/100 ({fng_c})`",
-                        f"💡 **Analysis:** {summary}"
-                    ]
-                    if flags:
-                        flags_str = ", ".join(f"`{f}`" for f in flags)
-                        lines.append(f"⚠️ **Flags:** {flags_str}")
-
-                    embed.add_field(name="🤖 AI Risk Assessment", value="\n".join(lines), inline=False)
-                elif isinstance(ai_data, str) and ai_data:
-                    embed.add_field(name="🤖 AI Risk Assessment", value=ai_data, inline=False)
-
-            embed.set_footer(text="Cripto-3DS Engine • Tap button below to authorize")
-
-            view = TradeApprovalView(trade_id=trade.get("id", int(time.time())), timeout=timeout_sec)
+            timeout_sec = max((t.get("timeout_sec", 600) for t in trades), default=600)
+            embed = build_multi_trade_embed(trades)
+            view = BatchTradeApprovalView(trades=trades, timeout=timeout_sec)
             msg = await channel.send(embed=embed, view=view)
             view.message = msg
-            logger.info("Interactive Discord trade approval message sent with buttons.")
+            logger.info(f"Consolidated interactive Discord trade table card sent ({len(trades)} assets).")
             return True
         except Exception as e:
-            logger.error(f"Failed to send interactive Discord trade: {e}")
+            logger.error(f"Failed to send interactive Discord trade table: {e}")
             return False
+
+    async def send_interactive_trade(self, trade: dict) -> bool:
+        return await self.send_interactive_trades([trade])
 
 discord_bot_service = DiscordBotService()
 
-async def send_discord_notification(subject: str, body: str, config: dict, trade: dict = None):
-    # 1. Try interactive Discord Gateway bot first if trade payload provided
-    if trade:
-        sent = await discord_bot_service.send_interactive_trade(trade)
+async def send_discord_notification(subject: str, body: str, config: dict, trade: dict = None, trades: list = None):
+    trade_list = trades or ([trade] if trade else None)
+    if trade_list:
+        sent = await discord_bot_service.send_interactive_trades(trade_list)
         if sent:
             return
 
@@ -670,9 +879,21 @@ async def send_discord_notification(subject: str, body: str, config: dict, trade
     if not webhook_url:
         return
     
-    payload = {
-        "content": f"**{subject}**\n{body}"
-    }
+    if trade_list:
+        table_lines = [
+            f"**{subject}**",
+            "```",
+            f"{'Pair':<10} {'Act':<5} {'Price':<11} {'Size':<8} {'Reason'}",
+            "─" * 50
+        ]
+        for t in trade_list:
+            table_lines.append(f"{t.get('pair',''):<10} {t.get('action',''):<5} ${t.get('price',0):<10.2f} ${t.get('amount_usdt',0):<7.0f} {t.get('reason','')[:20]}")
+        table_lines.append("```")
+        content = "\n".join(table_lines)
+    else:
+        content = f"**{subject}**\n{body}"
+
+    payload = {"content": content}
     
     try:
         async with aiohttp.ClientSession() as session:

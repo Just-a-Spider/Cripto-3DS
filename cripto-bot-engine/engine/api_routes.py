@@ -237,33 +237,51 @@ async def toggle_bot(active: bool):
     await broadcast_state()
     return {"status": "ok", "is_active": state.is_active}
 
+from engine.trades import decide_trade, decide_all_trades
+
 @router.post("/api/trade/decide", dependencies=[Depends(verify_pin)])
-async def api_decide_trade(approved: bool, override_usdt: float = None):
-    return await decide_trade(approved, override_usdt)
+async def api_decide_trade(approved: bool, trade_id: int = None, pair: str = None, override_usdt: float = None):
+    return await decide_trade(approved=approved, trade_id=trade_id, pair=pair, override_usdt=override_usdt)
+
+@router.post("/api/trade/decide_all", dependencies=[Depends(verify_pin)])
+async def api_decide_all_trades(approved: bool):
+    results = await decide_all_trades(approved=approved)
+    return {"status": "ok", "results": results}
 
 @router.post("/api/trade/simulate", dependencies=[Depends(verify_pin)])
-async def simulate_trade():
-    curr_price = state.prices.get("BTCUSDT", 0.0) or 64000.0
-    state.pending_trade = {
-        "id": int(time.time()),
-        "action": "BUY",
-        "pair": "BTCUSDT",
-        "amount_usdt": risk_manager.max_trade_usdt,
-        "price": curr_price,
-        "reason": "Simulated Test Buy",
-        "created_at": time.time(),
-        "timeout_sec": 600
-    }
-    logger.info("Simulated trade decision queued.")
+async def simulate_trade(count: int = 1):
+    count = max(1, min(4, count))
+    target_pairs = state.favorite_pairs[:count] or ["BTCUSDT", "ETHUSDT"][:count]
+    now = time.time()
+    staged = []
+
+    for i, p in enumerate(target_pairs):
+        curr_price = state.prices.get(p, 0.0) or (64000.0 if "BTC" in p else (3400.0 if "ETH" in p else 150.0))
+        trade_id = int(now * 1000) + i
+        t = {
+            "id": trade_id,
+            "action": "BUY" if i % 2 == 0 else "SELL",
+            "pair": p,
+            "amount_usdt": risk_manager.max_trade_usdt,
+            "amount_asset": risk_manager.max_trade_usdt / curr_price,
+            "price": curr_price,
+            "reason": f"Simulated Test Signal ({p})",
+            "created_at": now,
+            "timeout_sec": 600
+        }
+        state.add_pending_trade(t)
+        staged.append(t)
+
+    logger.info(f"Simulated {len(staged)} trade decision(s) queued.")
     
     from engine.notifier import send_discord_notification
     cfg = await load_config_item("risk_config") or {}
-    subject = f"Crypto Bot Alert: BUY BTCUSDT (Simulated)"
-    body = f"A new BUY signal for BTCUSDT requires your approval.\nPrice: {curr_price}\nReason: Simulated Test Buy"
-    asyncio.create_task(send_discord_notification(subject, body, cfg, trade=state.pending_trade))
+    subject = f"Crypto Bot Alert: Simulated Signals ({len(staged)} Assets)"
+    body = f"Simulated trade signals require approval: {', '.join(t['pair'] for t in staged)}"
+    asyncio.create_task(send_discord_notification(subject, body, cfg, trades=staged))
     
     await broadcast_state()
-    return {"status": "ok", "pending_trade": state.pending_trade}
+    return {"status": "ok", "pending_trades": staged, "pending_trade": state.pending_trade}
 
 @router.post("/api/trade/force")
 async def force_evaluate_endpoint(x_auth_pin: str = Header(None)):

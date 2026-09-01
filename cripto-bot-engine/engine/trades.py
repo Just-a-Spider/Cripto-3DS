@@ -70,7 +70,7 @@ async def refresh_cost_bases():
                 state.cost_bases[pair] = await get_average_buy_price(pair, state.testnet)
 
 import math
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional, List
 
 def get_symbol_filter(pair: str) -> Dict[str, float]:
     return state.exchange_filters.get(pair, {
@@ -155,16 +155,32 @@ def extract_actual_order_price(order: Dict[str, Any], fallback_price: float) -> 
 
     return fallback_price, executed_qty, cummulative_usdt
 
-async def decide_trade(approved: bool, override_usdt: float = None):
-    if state.pending_trade:
+async def decide_trade(approved: bool, trade_id: Optional[int] = None, pair: Optional[str] = None, override_usdt: Optional[float] = None) -> Dict[str, Any]:
+    trade = None
+    if trade_id is not None:
+        trade = state.pending_trades.get(trade_id)
+    elif pair is not None:
+        for t in state.pending_trades.values():
+            if t.get("pair") == pair:
+                trade = t
+                break
+    else:
         trade = state.pending_trade
+
+    if trade:
+        tid = trade.get("id")
         if approved and override_usdt is not None and override_usdt > 0:
             trade['amount_usdt'] = override_usdt
             if trade['price'] > 0:
                 trade['amount_asset'] = override_usdt / trade['price']
-        state.pending_trade = None
+        
+        if tid is not None:
+            state.remove_pending_trade(tid)
+        else:
+            state.pending_trade = None
+
         if approved:
-            logger.info(f"Trade APPROVED: {trade['action']} {trade['pair']}")
+            logger.info(f"Trade APPROVED: {trade['action']} {trade['pair']} (ID: {tid})")
             
             # 1. Risk Manager validation
             valid, reason = risk_manager.validate_trade(trade['action'], trade['amount_usdt'], state.usdt_balance)
@@ -172,7 +188,7 @@ async def decide_trade(approved: bool, override_usdt: float = None):
                 logger.warning(f"Trade blocked by RiskManager: {reason}")
                 await log_trade(trade['pair'], trade['action'], trade['amount_usdt'], trade['price'], f"BLOCKED: {reason}", is_testnet=state.testnet)
                 await broadcast_state()
-                return {"status": "blocked", "reason": reason}
+                return {"status": "blocked", "reason": reason, "trade": trade}
 
             # 2. Exchange Filter & Lot Size validation
             raw_qty = trade.get('amount_asset', 0.0)
@@ -183,7 +199,7 @@ async def decide_trade(approved: bool, override_usdt: float = None):
                 logger.warning(f"Trade blocked by Exchange Filter: {ex_reason}")
                 await log_trade(trade['pair'], trade['action'], trade['amount_usdt'], trade['price'], f"BLOCKED: {ex_reason}", is_testnet=state.testnet)
                 await broadcast_state()
-                return {"status": "blocked", "reason": ex_reason}
+                return {"status": "blocked", "reason": ex_reason, "trade": trade}
 
             order_id = "SIMULATED_ORDER"
             exec_price = trade['price']
@@ -259,11 +275,19 @@ async def decide_trade(approved: bool, override_usdt: float = None):
                 "realized_pnl_percent": realized_pnl_percent
             }
         else:
-            logger.info(f"Trade REJECTED: {trade['action']} {trade['pair']}")
+            logger.info(f"Trade REJECTED: {trade['action']} {trade['pair']} (ID: {tid})")
             await log_trade(trade['pair'], trade['action'], trade['amount_usdt'], trade['price'], "REJECTED", is_testnet=state.testnet)
             await broadcast_state()
             return {"status": "rejected", "trade": trade}
     return {"status": "no_pending_trade"}
+
+async def decide_all_trades(approved: bool) -> List[Dict[str, Any]]:
+    trade_ids = list(state.pending_trades.keys())
+    results = []
+    for tid in trade_ids:
+        res = await decide_trade(approved=approved, trade_id=tid)
+        results.append(res)
+    return results
 
 
 async def execute_manual_sell(asset: str, percent: float, pin: str) -> Dict[str, Any]:
