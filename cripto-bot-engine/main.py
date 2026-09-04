@@ -4,6 +4,7 @@ import logging
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from engine.db import init_db
 from engine.logger import logger
@@ -22,77 +23,108 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
     
-    saved_cfg = await load_config_item("risk_config")
-    if saved_cfg:
-        risk_manager.max_trade_usdt = saved_cfg.get("max_trade_usdt", risk_manager.max_trade_usdt)
-        risk_manager.max_daily_spend_usdt = saved_cfg.get("max_daily_spend_usdt", risk_manager.max_daily_spend_usdt)
-        risk_manager.min_usdt_reserve = saved_cfg.get("min_usdt_reserve", risk_manager.min_usdt_reserve)
-        risk_manager.require_human_approval = saved_cfg.get("require_human_approval", risk_manager.require_human_approval)
-        state.auth_pin = saved_cfg.get("auth_pin", "1234")
-        state.testnet = saved_cfg.get("testnet", True)
-        
-        if "favorite_pairs" in saved_cfg:
-            state.favorite_pairs = saved_cfg["favorite_pairs"].split(",")
-        
-        state.dca_strategy.interval_sec = saved_cfg.get("dca_interval", 3600)
-        state.rsi_strategy.oversold_rsi = saved_cfg.get("rsi_threshold", 30.0)
-        state.tpsl_strategy.tp_percent = saved_cfg.get("tp_percent", 5.0)
-        state.tpsl_strategy.sl_percent = saved_cfg.get("sl_percent", 3.0)
-        state.tpsl_strategy.trailing_enabled = saved_cfg.get("trailing_enabled", True)
-        state.tpsl_strategy.trailing_activation_percent = saved_cfg.get("trailing_activation_percent", 3.0)
-        state.tpsl_strategy.trailing_delta_percent = saved_cfg.get("trailing_delta_percent", 1.5)
-        state.rsi_strategy.timeframe_minutes = saved_cfg.get("rsi_timeframe_minutes", 60)
-        state.rsi_strategy.history_length = saved_cfg.get("rsi_history_length", 250)
-        state.signal_cooldown_hours = saved_cfg.get("signal_cooldown_hours", 24.0)
-        state.discord_webhook_url = saved_cfg.get("discord_webhook_url", "")
-        state.discord_bot_token = saved_cfg.get("discord_bot_token", os.getenv("DISCORD_BOT_TOKEN", ""))
-        state.discord_channel_id = saved_cfg.get("discord_channel_id", os.getenv("DISCORD_CHANNEL_ID", ""))
-        
-        raw_discord_ids = saved_cfg.get("allowed_discord_user_ids")
-        if not raw_discord_ids:
-            raw_discord_ids = os.getenv("ALLOWED_DISCORD_USER_IDS") or os.getenv("DISCORD_USER_ID", "")
+    saved_cfg = await load_config_item("risk_config") or {}
+    
+    # Risk Configuration
+    risk_manager.max_trade_usdt = float(saved_cfg.get("max_trade_usdt", os.getenv("MAX_TRADE_USDT", risk_manager.max_trade_usdt)))
+    risk_manager.max_daily_spend_usdt = float(saved_cfg.get("max_daily_spend_usdt", os.getenv("MAX_DAILY_SPEND_USDT", risk_manager.max_daily_spend_usdt)))
+    risk_manager.min_usdt_reserve = float(saved_cfg.get("min_usdt_reserve", os.getenv("MIN_USDT_RESERVE", risk_manager.min_usdt_reserve)))
+    
+    raw_approval = saved_cfg.get("require_human_approval", os.getenv("REQUIRE_HUMAN_APPROVAL", str(risk_manager.require_human_approval)))
+    risk_manager.require_human_approval = str(raw_approval).lower() in ("true", "1", "yes")
 
-        if isinstance(raw_discord_ids, list):
-            state.allowed_discord_user_ids = [str(x).strip() for x in raw_discord_ids if str(x).strip()]
-        elif isinstance(raw_discord_ids, str) and raw_discord_ids.strip():
-            state.allowed_discord_user_ids = [x.strip() for x in raw_discord_ids.split(",") if x.strip()]
-        else:
-            state.allowed_discord_user_ids = []
+    state.auth_pin = str(saved_cfg.get("auth_pin", os.getenv("AUTH_PIN", "1234")))
 
-        if state.allowed_discord_user_ids:
-            logger.info(f"Loaded {len(state.allowed_discord_user_ids)} authorized Discord operator ID(s).")
-        else:
-            logger.warning("No authorized Discord user IDs configured. Discord bot commands will be locked until an ID is set in .env or Web Companion.")
+    raw_testnet = saved_cfg.get("testnet", os.getenv("BINANCE_TESTNET", "true"))
+    state.testnet = str(raw_testnet).lower() in ("true", "1", "yes")
+    
+    fav_pairs = saved_cfg.get("favorite_pairs", os.getenv("FAVORITE_PAIRS", "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT"))
+    if isinstance(fav_pairs, list):
+        state.favorite_pairs = fav_pairs
+    elif isinstance(fav_pairs, str) and fav_pairs.strip():
+        state.favorite_pairs = [p.strip() for p in fav_pairs.split(",") if p.strip()]
+    
+    state.dca_strategy.interval_sec = int(saved_cfg.get("dca_interval", os.getenv("DCA_INTERVAL", 3600)))
+    state.rsi_strategy.oversold_rsi = float(saved_cfg.get("rsi_threshold", os.getenv("RSI_THRESHOLD", 30.0)))
+    state.tpsl_strategy.tp_percent = float(saved_cfg.get("tp_percent", os.getenv("TP_PERCENT", 5.0)))
+    state.tpsl_strategy.sl_percent = float(saved_cfg.get("sl_percent", os.getenv("SL_PERCENT", 3.0)))
 
-        state.gemini_api_key = saved_cfg.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))
-        state.gemini_model = saved_cfg.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"))
-        state.gemini_search_model = saved_cfg.get("gemini_search_model", os.getenv("GEMINI_SEARCH_MODEL", "gemini-3.5-flash"))
-        state.ai_scout_enabled = saved_cfg.get("ai_scout_enabled", True)
-        state.ai_scout_interval_hours = float(saved_cfg.get("ai_scout_interval_hours", 2.0))
-        state.ai_scout_min_confidence = float(saved_cfg.get("ai_scout_min_confidence", 0.85))
-            
-        enc_api = saved_cfg.get("api_key", "")
-        enc_sec = saved_cfg.get("secret_key", "")
-        if enc_api and enc_sec:
+    raw_trailing = saved_cfg.get("trailing_enabled", os.getenv("TRAILING_ENABLED", "true"))
+    state.tpsl_strategy.trailing_enabled = str(raw_trailing).lower() in ("true", "1", "yes")
+    state.tpsl_strategy.trailing_activation_percent = float(saved_cfg.get("trailing_activation_percent", os.getenv("TRAILING_ACTIVATION_PERCENT", 3.0)))
+    state.tpsl_strategy.trailing_delta_percent = float(saved_cfg.get("trailing_delta_percent", os.getenv("TRAILING_DELTA_PERCENT", 1.5)))
+
+    raw_partial_tp = saved_cfg.get("partial_tp_enabled", os.getenv("PARTIAL_TP_ENABLED", "true"))
+    state.tpsl_strategy.partial_tp_enabled = str(raw_partial_tp).lower() in ("true", "1", "yes")
+    state.tpsl_strategy.partial_tp_percent = float(saved_cfg.get("partial_tp_percent", os.getenv("PARTIAL_TP_PERCENT", 4.0)))
+    state.tpsl_strategy.partial_tp_ratio = float(saved_cfg.get("partial_tp_ratio", os.getenv("PARTIAL_TP_RATIO", 0.5)))
+
+    raw_bull_dip = saved_cfg.get("bull_regime_dip_enabled", os.getenv("BULL_REGIME_DIP_ENABLED", "true"))
+    state.rsi_strategy.bull_regime_dip_enabled = str(raw_bull_dip).lower() in ("true", "1", "yes")
+    state.rsi_strategy.bull_rsi_threshold = float(saved_cfg.get("bull_rsi_threshold", os.getenv("BULL_RSI_THRESHOLD", 42.0)))
+
+    state.rsi_strategy.timeframe_minutes = int(saved_cfg.get("rsi_timeframe_minutes", os.getenv("RSI_TIMEFRAME_MINUTES", 60)))
+    state.rsi_strategy.history_length = int(saved_cfg.get("rsi_history_length", os.getenv("RSI_HISTORY_LENGTH", 250)))
+    state.signal_cooldown_hours = float(saved_cfg.get("signal_cooldown_hours", os.getenv("SIGNAL_COOLDOWN_HOURS", 24.0)))
+
+    state.discord_webhook_url = saved_cfg.get("discord_webhook_url", os.getenv("DISCORD_WEBHOOK_URL", ""))
+    state.discord_bot_token = saved_cfg.get("discord_bot_token", os.getenv("DISCORD_BOT_TOKEN", ""))
+    state.discord_channel_id = saved_cfg.get("discord_channel_id", os.getenv("DISCORD_CHANNEL_ID", ""))
+    
+    raw_discord_ids = saved_cfg.get("allowed_discord_user_ids")
+    if not raw_discord_ids:
+        raw_discord_ids = os.getenv("ALLOWED_DISCORD_USER_IDS") or os.getenv("DISCORD_USER_ID", "")
+
+    if isinstance(raw_discord_ids, list):
+        state.allowed_discord_user_ids = [str(x).strip() for x in raw_discord_ids if str(x).strip()]
+    elif isinstance(raw_discord_ids, str) and raw_discord_ids.strip():
+        state.allowed_discord_user_ids = [x.strip() for x in raw_discord_ids.split(",") if x.strip()]
+    else:
+        state.allowed_discord_user_ids = []
+
+    if state.allowed_discord_user_ids:
+        logger.info(f"Loaded {len(state.allowed_discord_user_ids)} authorized Discord operator ID(s).")
+    else:
+        logger.warning("No authorized Discord user IDs configured. Discord bot commands will be locked until an ID is set in .env or Web Companion.")
+
+    state.gemini_api_key = saved_cfg.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))
+    state.gemini_model = saved_cfg.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"))
+    state.gemini_search_model = saved_cfg.get("gemini_search_model", os.getenv("GEMINI_SEARCH_MODEL", "gemini-3.1-flash-lite"))
+    
+    raw_grounding = saved_cfg.get("enable_search_grounding", os.getenv("ENABLE_SEARCH_GROUNDING", "false"))
+    state.enable_search_grounding = str(raw_grounding).lower() in ("true", "1", "yes")
+
+    state.groq_api_key = saved_cfg.get("groq_api_key", os.getenv("GROQ_API_KEY", ""))
+    state.groq_model = saved_cfg.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
+
+    raw_ai_scout = saved_cfg.get("ai_scout_enabled", os.getenv("AI_SCOUT_ENABLED", "true"))
+    state.ai_scout_enabled = str(raw_ai_scout).lower() in ("true", "1", "yes")
+    state.ai_scout_interval_hours = float(saved_cfg.get("ai_scout_interval_hours", os.getenv("AI_SCOUT_INTERVAL_HOURS", 2.0)))
+    state.ai_scout_min_confidence = float(saved_cfg.get("ai_scout_min_confidence", os.getenv("AI_SCOUT_MIN_CONFIDENCE", 0.85)))
+        
+    enc_api = saved_cfg.get("api_key", "")
+    enc_sec = saved_cfg.get("secret_key", "")
+    if enc_api and enc_sec:
+        try:
+            cipher = get_cipher(state.auth_pin)
+            state.api_key = cipher.decrypt(enc_api.encode()).decode()
+            state.secret_key = cipher.decrypt(enc_sec.encode()).decode()
+        except Exception:
             try:
-                cipher = get_cipher(state.auth_pin)
-                state.api_key = cipher.decrypt(enc_api.encode()).decode()
-                state.secret_key = cipher.decrypt(enc_sec.encode()).decode()
+                from engine.state import get_legacy_cipher
+                legacy = get_legacy_cipher(state.auth_pin)
+                state.api_key = legacy.decrypt(enc_api.encode()).decode()
+                state.secret_key = legacy.decrypt(enc_sec.encode()).decode()
+                # Re-encrypt with modern PBKDF2HMAC
+                saved_cfg["api_key"] = cipher.encrypt(state.api_key.encode()).decode() # type: ignore
+                saved_cfg["secret_key"] = cipher.encrypt(state.secret_key.encode()).decode() # type: ignore
+                from engine.db import save_config_item
+                await save_config_item("risk_config", saved_cfg)
+                logger.info("Migrated API keys to PBKDF2HMAC encryption.")
             except Exception:
-                try:
-                    from engine.state import get_legacy_cipher
-                    legacy = get_legacy_cipher(state.auth_pin)
-                    state.api_key = legacy.decrypt(enc_api.encode()).decode()
-                    state.secret_key = legacy.decrypt(enc_sec.encode()).decode()
-                    # Re-encrypt with modern PBKDF2HMAC
-                    saved_cfg["api_key"] = cipher.encrypt(state.api_key.encode()).decode()
-                    saved_cfg["secret_key"] = cipher.encrypt(state.secret_key.encode()).decode()
-                    from engine.db import save_config_item
-                    await save_config_item("risk_config", saved_cfg)
-                    logger.info("Migrated API keys to PBKDF2HMAC encryption.")
-                except Exception:
-                    logger.error("Failed to decrypt API keys (Invalid PIN?)")
-        
+                logger.error("Failed to decrypt API keys (Invalid PIN?)")
+    
+    if saved_cfg:
         logger.info(f"Loaded config from DB.")
 
     await risk_manager.refresh_daily_spend(state.testnet)
@@ -141,6 +173,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if os.path.isdir(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 app.include_router(api_router)
 

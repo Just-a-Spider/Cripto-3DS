@@ -75,8 +75,11 @@ class ConfigModel(BaseModel):
     discord_channel_id: str = ""
     allowed_discord_user_ids: Union[str, List[str], List[int]] = ""
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.1-flash-lite"
-    gemini_search_model: str = "gemini-3.5-flash"
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_search_model: str = "gemini-3.1-flash-lite"
+    enable_search_grounding: bool = False
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
     ai_scout_enabled: bool = True
     ai_scout_interval_hours: float = 2.0
     ai_scout_min_confidence: float = 0.85
@@ -98,7 +101,7 @@ class BotState:
         self.portfolio_balances: Dict[str, float] = {}
         self.current_pair_idx: int = 0
         self.pending_trades: Dict[int, Dict[str, Any]] = {}
-        self.binance_client: AsyncClient = None
+        self.binance_client: AsyncClient = None # type: ignore
         self.auth_pin: str = "1234"
         self.api_key: str = ""
         self.secret_key: str = ""
@@ -116,8 +119,11 @@ class BotState:
         self.discord_channel_id: str = ""
         self.gemini_api_key: str = ""
         self.gemini_model: str = "gemini-3.1-flash-lite"
-        self.gemini_search_model: str = "gemini-3.5-flash"
-        self.available_gemini_models: List[str] = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
+        self.gemini_search_model: str = "gemini-3.1-flash-lite"
+        self.enable_search_grounding: bool = False
+        self.groq_api_key: str = ""
+        self.groq_model: str = "llama-3.3-70b-versatile"
+        self.available_gemini_models: List[str] = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3-flash-preview"]
         self.ai_scout_enabled: bool = True
         self.ai_scout_interval_hours: float = 2.0
         self.ai_scout_min_confidence: float = 0.85
@@ -230,7 +236,10 @@ class BotState:
             "discord_channel_id": self.discord_channel_id,
             "gemini_model": self.gemini_model,
             "gemini_search_model": self.gemini_search_model,
+            "enable_search_grounding": self.enable_search_grounding,
             "has_gemini": bool(self.gemini_api_key),
+            "has_groq": bool(self.groq_api_key),
+            "groq_model": self.groq_model,
             "has_pin": bool(self.auth_pin),
             "allowed_discord_user_ids": list(self.allowed_discord_user_ids),
             "available_gemini_models": self.available_gemini_models,

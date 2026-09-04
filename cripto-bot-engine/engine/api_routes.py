@@ -1,3 +1,4 @@
+import os
 import asyncio
 import time
 import json
@@ -32,13 +33,17 @@ def verify_pin(request: Request, x_auth_pin: str = Header(None)):
         logger.warning(f"Unauthorized API access attempt blocked from {client_host}")
         raise HTTPException(status_code=401, detail="Invalid PIN")
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WEB_COMPANION_PATH = os.path.join(BASE_DIR, "web_companion.html")
+
 @router.get("/", response_class=HTMLResponse)
 async def get_index():
     return HTMLResponse("<h1>Engine is running.</h1>")
 
 @router.get("/web", response_class=HTMLResponse)
 async def get_web():
-    response = FileResponse("web_companion.html")
+    path = WEB_COMPANION_PATH if os.path.exists(WEB_COMPANION_PATH) else "web_companion.html"
+    response = FileResponse(path)
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
@@ -148,6 +153,23 @@ async def update_config(cfg: ConfigModel):
 
     state.gemini_model = cfg.gemini_model.strip() if cfg.gemini_model else "gemini-3.1-flash-lite"
     cfg_dict["gemini_model"] = state.gemini_model
+
+    if getattr(cfg, "gemini_search_model", None):
+        state.gemini_search_model = cfg.gemini_search_model.strip()
+    cfg_dict["gemini_search_model"] = state.gemini_search_model
+
+    state.enable_search_grounding = bool(getattr(cfg, "enable_search_grounding", False))
+    cfg_dict["enable_search_grounding"] = state.enable_search_grounding
+
+    if getattr(cfg, "groq_api_key", None):
+        state.groq_api_key = cfg.groq_api_key.strip()
+        cfg_dict["groq_api_key"] = state.groq_api_key
+    else:
+        state.groq_api_key = saved_cfg.get("groq_api_key", state.groq_api_key)
+        cfg_dict["groq_api_key"] = state.groq_api_key
+
+    state.groq_model = cfg.groq_model.strip() if getattr(cfg, "groq_model", None) else "llama-3.3-70b-versatile"
+    cfg_dict["groq_model"] = state.groq_model
 
     state.ai_scout_enabled = getattr(cfg, "ai_scout_enabled", True)
     state.ai_scout_interval_hours = float(getattr(cfg, "ai_scout_interval_hours", 2.0))

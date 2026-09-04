@@ -857,41 +857,61 @@ class DiscordBotService:
                 logger.warning(f"Discord channel {clean_channel_id} not found.")
                 return False
 
-            # Run AI analysis across all trades concurrently if Gemini API key is configured
-            if state.gemini_api_key:
-                from engine.ai_analyst import analyze_trade_signal
-                from engine.strategies import calculate_bollinger_bands
+            # Run AI analysis or quantitative math across all trades concurrently
+            from engine.ai_analyst import analyze_trade_signal, fallback_trade_signal_analysis
+            from engine.strategies import calculate_bollinger_bands
 
-                async def _analyze_trade(t):
-                    if t.get("ai_verdict"):
-                        return
-                    pair = t.get("pair", "BTCUSDT")
-                    rsi_val = state.rsi_strategy.calculate_rsi(pair)
-                    hist = state.rsi_strategy.price_histories.get(pair, [])
-                    _, _, _, pct_b = calculate_bollinger_bands(hist, 20, 2.0)
-                    ai_data = await analyze_trade_signal(
+            async def _analyze_trade(t):
+                if t.get("ai_verdict"):
+                    return
+                pair = t.get("pair", "BTCUSDT")
+                rsi_val = state.rsi_strategy.calculate_rsi(pair)
+                hist = state.rsi_strategy.price_histories.get(pair, [])
+                _, _, _, pct_b = calculate_bollinger_bands(hist, 20, 2.0)
+                ai_data = None
+                if state.gemini_api_key or getattr(state, "groq_api_key", ""):
+                    try:
+                        ai_data = await asyncio.wait_for(
+                            analyze_trade_signal(
+                                pair=pair,
+                                action=t.get("action", "BUY"),
+                                price=t.get("price", 0.0),
+                                rsi=rsi_val,
+                                pct_b=pct_b,
+                                reason=t.get("reason", ""),
+                                price_history=hist,
+                                api_key=state.gemini_api_key,
+                                model=state.gemini_model
+                            ),
+                            timeout=4.5
+                        )
+                    except Exception as e:
+                        logger.warning(f"AI trade analysis timeout/error on {pair}: {e}. Engaging math fallback.")
+                        ai_data = None
+
+                if not isinstance(ai_data, dict):
+                    ai_data = await fallback_trade_signal_analysis(
                         pair=pair,
                         action=t.get("action", "BUY"),
                         price=t.get("price", 0.0),
                         rsi=rsi_val,
                         pct_b=pct_b,
                         reason=t.get("reason", ""),
-                        price_history=hist,
-                        api_key=state.gemini_api_key,
-                        model=state.gemini_model
+                        price_history=hist
                     )
-                    if isinstance(ai_data, dict):
-                        verdict = ai_data.get("verdict", "CAUTION")
-                        risk_score = ai_data.get("risk_score", 5)
-                        risk_label = "LOW" if risk_score <= 3 else ("MEDIUM" if risk_score <= 6 else "HIGH")
-                        t["ai_verdict"] = verdict
-                        t["ai_risk"] = f"{risk_label} ({risk_score}/10)"
-                        t["ai_sl"] = ai_data.get("suggested_sl_percent", 3.0)
-                        t["ai_summary"] = ai_data.get("summary", "")
-                        t["fng"] = f"{ai_data.get('fng_index', 50)}/100 ({ai_data.get('fng_classification', 'Neutral')})"
-                        t["red_flags"] = ai_data.get("red_flags", [])
 
-                await asyncio.gather(*[_analyze_trade(t) for t in trades], return_exceptions=True)
+                if isinstance(ai_data, dict):
+                    verdict = ai_data.get("verdict", "CAUTION")
+                    risk_score = ai_data.get("risk_score", 5)
+                    risk_label = "LOW" if risk_score <= 3 else ("MEDIUM" if risk_score <= 6 else "HIGH")
+                    t["ai_verdict"] = verdict
+                    t["ai_risk"] = f"{risk_label} ({risk_score}/10)"
+                    t["ai_sl"] = ai_data.get("suggested_sl_percent", 3.0)
+                    t["ai_summary"] = ai_data.get("summary", "")
+                    t["fng"] = f"{ai_data.get('fng_index', 50)}/100 ({ai_data.get('fng_classification', 'Neutral')})"
+                    t["red_flags"] = ai_data.get("red_flags", [])
+
+            await asyncio.gather(*[_analyze_trade(t) for t in trades], return_exceptions=True)
 
             timeout_sec = max((t.get("timeout_sec", 600) for t in trades), default=600)
             embed = build_multi_trade_embed(trades)

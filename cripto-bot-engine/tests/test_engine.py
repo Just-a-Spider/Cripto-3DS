@@ -342,8 +342,11 @@ def test_gemini_state_and_config():
     assert "gemini_search_model" in d
     assert "has_gemini" in d
     assert "available_gemini_models" in d
+    assert "enable_search_grounding" in d
+    assert "has_groq" in d
     assert d["gemini_model"] == "gemini-3.1-flash-lite"
-    assert d["gemini_search_model"] == "gemini-3.5-flash"
+    assert d["gemini_search_model"] == "gemini-3.1-flash-lite"
+    assert d["enable_search_grounding"] is False
 
 @pytest.mark.asyncio
 async def test_clear_trade_history():
@@ -626,6 +629,9 @@ async def test_gemini_unsupported_model_filter():
     assert _is_unsupported_model("gemini-2.0-flash") is True
     assert _is_unsupported_model("gemini-1.5-flash") is True
     assert _is_unsupported_model("gemini-3.1-flash-lite-tts") is True
+    assert _is_unsupported_model("gemini-3.5-transcribe") is True
+    assert _is_unsupported_model("gemini-3.5-audio") is True
+    assert _is_unsupported_model("gemini-3.5-live") is True
     assert _is_unsupported_model("gemini-3.1-flash-lite") is False
     assert _is_unsupported_model("gemini-3.5-flash") is False
     assert _is_unsupported_model("gemini-flash-lite-latest") is False
@@ -1584,6 +1590,104 @@ def test_web_companion_cache_headers():
     assert "no-cache" in cache_control
     assert "no-store" in cache_control
 
+def test_web_companion_decoupled_static_assets():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+
+    # 1. Check HTML links static assets cleanly
+    res_html = client.get("/web")
+    assert res_html.status_code == 200
+    html_text = res_html.text
+    assert '<link rel="stylesheet" href="/static/css/style.css">' in html_text
+    assert '<script src="/static/js/app.js"></script>' in html_text
+    assert '<script src="/static/js/trading.js"></script>' in html_text
+    assert '<script src="/static/js/settings.js"></script>' in html_text
+    assert "<style>" not in html_text
+    assert 'id="enable-search-grounding"' in html_text
+    assert 'id="groq-api-key"' in html_text
+    assert 'id="groq-model"' in html_text
+
+    # 2. Check CSS endpoint
+    res_css = client.get("/static/css/style.css")
+    assert res_css.status_code == 200
+    assert "text/css" in res_css.headers.get("content-type", "")
+    assert ":root" in res_css.text
+    assert ".card" in res_css.text
+
+    # 3. Check decoupled JS endpoints
+    res_app = client.get("/static/js/app.js")
+    assert res_app.status_code == 200
+    assert "javascript" in res_app.headers.get("content-type", "")
+    assert "submitPin" in res_app.text
+    assert "updateUI" in res_app.text
+    assert "fetchNewsInsights" in res_app.text
+
+    res_trading = client.get("/static/js/trading.js")
+    assert res_trading.status_code == 200
+    assert "javascript" in res_trading.headers.get("content-type", "")
+    assert "submitManualBuy" in res_trading.text
+    assert "submitManualSell" in res_trading.text
+
+    res_settings = client.get("/static/js/settings.js")
+    assert res_settings.status_code == 200
+    assert "javascript" in res_settings.headers.get("content-type", "")
+    assert "populateSettingsInputs" in res_settings.text
+    assert "saveConfig" in res_settings.text
+
+    # 4. Check syntax validity of JS files
+    import shutil, subprocess
+    if shutil.which("node"):
+        p = subprocess.run(["node", "-c", "static/js/app.js", "static/js/trading.js", "static/js/settings.js"], capture_output=True, text=True)
+        assert p.returncode == 0, f"JS syntax check failed: {p.stderr}"
+
+    # 5. Check 404 for missing static asset
+    res_404 = client.get("/static/css/nonexistent.css")
+    assert res_404.status_code == 404
+
+@pytest.mark.asyncio
+async def test_api_config_ai_and_groq_persistence():
+    from fastapi.testclient import TestClient
+    from main import app
+    from engine.state import state
+    from engine.db import load_config_item
+
+    client = TestClient(app)
+    pin = state.auth_pin or "0716"
+
+    payload = {
+        "max_trade_usdt": 45.0,
+        "max_daily_spend_usdt": 180.0,
+        "min_usdt_reserve": 15.0,
+        "require_human_approval": True,
+        "auth_pin": pin,
+        "testnet": True,
+        "favorite_pairs": "BTCUSDT,ETHUSDT",
+        "gemini_model": "gemini-3.1-flash-lite",
+        "gemini_search_model": "gemini-3.5-flash-lite",
+        "enable_search_grounding": True,
+        "groq_api_key": "gsk_test12345",
+        "groq_model": "llama-3.3-70b-versatile"
+    }
+
+    res = client.post("/api/config", json=payload, headers={"X-Auth-PIN": pin})
+    assert res.status_code == 200
+
+    # Verify memory state
+    assert state.gemini_search_model == "gemini-3.5-flash-lite"
+    assert state.enable_search_grounding is True
+    assert state.groq_api_key == "gsk_test12345"
+    assert state.groq_model == "llama-3.3-70b-versatile"
+
+    # Verify DB persistence
+    saved = await load_config_item("risk_config")
+    assert saved is not None
+    assert saved.get("gemini_search_model") == "gemini-3.5-flash-lite"
+    assert saved.get("enable_search_grounding") is True
+    assert saved.get("groq_api_key") == "gsk_test12345"
+    assert saved.get("groq_model") == "llama-3.3-70b-versatile"
+
 def test_dump_pydantic_model_compatibility():
     from engine.api_routes import dump_pydantic_model
 
@@ -1713,6 +1817,168 @@ def test_api_deduplicate_trades():
     data = res.json()
     assert data["status"] == "ok"
     assert "pruned_duplicates" in data
+
+
+@pytest.mark.asyncio
+async def test_gemini_503_circuit_breaker_and_cooldown():
+    from engine.ai_analyst import is_model_on_cooldown, record_model_cooldown, clear_model_cooldowns
+
+    clear_model_cooldowns()
+    assert not is_model_on_cooldown("gemini-3.5-flash-lite")
+
+    # Record 503 high demand cooldown
+    record_model_cooldown("gemini-3.5-flash-lite", duration_sec=600.0)
+    assert is_model_on_cooldown("gemini-3.5-flash-lite")
+    assert is_model_on_cooldown("models/gemini-3.5-flash-lite")
+
+    clear_model_cooldowns()
+    assert not is_model_on_cooldown("gemini-3.5-flash-lite")
+
+
+@pytest.mark.asyncio
+async def test_trade_signal_algorithmic_fallback_on_outage(monkeypatch):
+    from engine.ai_analyst import analyze_trade_signal
+    import engine.ai_analyst as ai_mod
+
+    # Simulate Gemini total outage (returning None)
+    async def mock_call_gemini(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(ai_mod, "call_gemini", mock_call_gemini)
+
+    res = await analyze_trade_signal(
+        pair="BTCUSDT",
+        action="BUY",
+        price=64000.0,
+        rsi=28.0,
+        pct_b=0.15,
+        reason="Wilder RSI Oversold Bounce",
+        price_history=[65000, 64500, 64000],
+        api_key="mock_free_key"
+    )
+
+    assert isinstance(res, dict)
+    assert res["verdict"] == "APPROVE"
+    assert res["risk_score"] <= 4
+    assert res["suggested_sl_percent"] > 0
+    assert "[ALGO FALLBACK]" in res["summary"]
+    assert "fng_index" in res
+
+
+@pytest.mark.asyncio
+async def test_scout_algorithmic_fallback_on_outage(monkeypatch):
+    from engine.ai_analyst import scan_market_opportunities
+    import engine.ai_analyst as ai_mod
+
+    # Simulate Gemini outage
+    async def mock_call_gemini(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(ai_mod, "call_gemini", mock_call_gemini)
+
+    mock_state = {
+        "prices": {"BTCUSDT": 64000.0, "ETHUSDT": 3200.0},
+        "favorite_pairs": ["BTCUSDT", "ETHUSDT"],
+        "indicators": {
+            "BTCUSDT": {"rsi": 28.0, "pct_b": 0.15},
+            "ETHUSDT": {"rsi": 72.0, "pct_b": 0.88}
+        }
+    }
+
+    res = await scan_market_opportunities(mock_state, api_key="mock_free_key")
+    assert isinstance(res, dict)
+    opps = res.get("top_opportunities", [])
+    assert len(opps) >= 1
+    types = [o["setup_type"] for o in opps]
+    assert "DIP_BUY" in types or "TAKE_PROFIT" in types
+    assert "[ALGO FALLBACK]" in res.get("tactical_summary", "")
+
+
+@pytest.mark.asyncio
+async def test_news_default_provider_and_grounding_disabled():
+    from engine.news_service import news_service, CryptoPanicProvider, GoogleSearchGroundingProvider
+    from engine.state import state
+
+    # 1. Default news service uses CryptoPanicProvider
+    assert isinstance(news_service.provider, CryptoPanicProvider)
+
+    # 2. Grounding provider respects enable_search_grounding=False
+    state.enable_search_grounding = False
+    grounding = GoogleSearchGroundingProvider()
+    news = await grounding.fetch_news(["BTC"])
+    assert isinstance(news, list)
+    # Delegates cleanly to CryptoPanic without error
+    assert len(news) > 0
+
+
+@pytest.mark.asyncio
+async def test_news_synthesis_fallback():
+    from engine.ai_analyst import fallback_news_synthesis
+    from engine.news_service import NewsItem
+    import time
+
+    sample_items = [
+        NewsItem(title="Bitcoin ETF Inflows Surge To Record High", asset="BTC", source="CoinDesk", url="https://example.com", sentiment_tag="BULLISH", published_at=time.time()),
+        NewsItem(title="Regulatory Clarity Sparks Altcoin Rally", asset="ETH", source="CoinTelegraph", url="https://example.com", sentiment_tag="BULLISH", published_at=time.time()),
+    ]
+
+    res = fallback_news_synthesis(sample_items)
+    assert res["overall_catalyst"] == "BULLISH"
+    assert len(res["bullets"]) == 3
+    assert "BTC" in res["bullets"][0]
+
+
+@pytest.mark.asyncio
+async def test_groq_fallback_integration(monkeypatch):
+    import engine.ai_analyst as ai_mod
+    from engine.state import state
+
+    # Mock call_groq returning valid JSON
+    async def mock_call_groq(*args, **kwargs):
+        return '{"verdict": "APPROVE", "risk_score": 2, "confidence": 0.95, "suggested_sl_percent": 2.0, "summary": "Groq Llama-3.3-70b evaluated oversold confluence.", "red_flags": []}'
+
+    monkeypatch.setattr(ai_mod, "call_groq", mock_call_groq)
+    # Ensure Gemini returns None so Groq is reached
+    monkeypatch.setattr(ai_mod, "HAS_GENAI_SDK", False)
+
+    state.groq_api_key = "gsk_test123"
+    try:
+        raw = await ai_mod.call_gemini("test prompt", api_key="invalid_gemini_key")
+        assert raw is not None
+        assert "Groq Llama-3.3-70b" in raw
+    finally:
+        state.groq_api_key = ""
+
+
+@pytest.mark.asyncio
+async def test_gemini_outage_capped_models_and_fast_bypass(monkeypatch):
+    import engine.ai_analyst as ai_mod
+    from engine.ai_analyst import call_gemini, record_model_cooldown, clear_model_cooldowns, ACTIVE_GEMINI_PRIORITY
+
+    clear_model_cooldowns()
+    monkeypatch.setattr(ai_mod, "HAS_GENAI_SDK", False)
+
+    # Place all active Gemini models on cooldown (simulating widespread 503)
+    for m in ACTIVE_GEMINI_PRIORITY:
+        record_model_cooldown(m, 600.0)
+
+    # With all on cooldown, call_gemini must immediately bypass without making HTTP calls
+    import aiohttp
+    called = []
+    def mock_post(*args, **kwargs):
+        called.append(args)
+        raise RuntimeError("Should not be called")
+
+    monkeypatch.setattr(aiohttp.ClientSession, "post", mock_post)
+
+    res = await call_gemini("test prompt", api_key="test_key", model="gemini-3.1-flash-lite")
+    # Must return None (or Groq if configured) with 0 HTTP calls
+    assert res is None
+    assert len(called) == 0
+
+    clear_model_cooldowns()
+
+
 
 
 

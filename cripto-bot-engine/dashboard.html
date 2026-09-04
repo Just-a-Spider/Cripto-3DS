@@ -150,8 +150,8 @@
                 <span style="font-weight: bold; color: var(--yellow);" id="mode-text">TESTNET</span>
             </div>
             <div>
-                <button class="btn btn-red" onclick="changeClientPin()">🔑 Change PIN</button>
-                <button class="btn btn-accent" onclick="document.getElementById('settings-modal').style.display='flex'">⚙️ Settings</button>
+                <button class="btn btn-red" onclick="changeClientPin()">Change PIN</button>
+                <button class="btn btn-accent" onclick="document.getElementById('settings-modal').style.display='flex'">SETTINGS</button>
             </div>
         </div>
 
@@ -175,8 +175,8 @@
             
             <div style="margin-top: 20px; display: flex; justify-content: center; gap: 15px;">
                 <span id="bot-status" class="badge badge-paused">PAUSED</span>
-                <button class="btn btn-green" onclick="toggleBot(true)">▶ START</button>
-                <button class="btn btn-red" onclick="toggleBot(false)">⏸ PAUSE</button>
+                <button class="btn btn-green" onclick="toggleBot(true)">START</button>
+                <button class="btn btn-red" onclick="toggleBot(false)">PAUSE</button>
                 <button class="btn btn-yellow" onclick="triggerSimulatedTrade()">TEST BUY</button>
                 <button class="btn btn-yellow" onclick="forceEvaluate()">FORCE CHECK</button>
             </div>
@@ -204,7 +204,7 @@
         <div class="modal-content">
             <div class="header">
                 <h2>Configuration & Strategy</h2>
-                <button class="btn btn-red" onclick="document.getElementById('settings-modal').style.display='none'">✖</button>
+                <button class="btn btn-red" onclick="document.getElementById('settings-modal').style.display='none'">X</button>
             </div>
             
             <div class="grid" style="margin-bottom: 20px;">
@@ -294,7 +294,7 @@
             </div>
             
             <div style="margin-top: 30px; text-align: center;">
-                <button class="btn btn-green" style="width: 100%;" onclick="saveConfig()">💾 Save All Settings</button>
+                <button class="btn btn-green" style="width: 100%;" onclick="saveConfig()"> Save All Settings</button>
             </div>
         </div>
     </div>
@@ -380,10 +380,10 @@
                 let html = `
                     <div style="background: rgba(189, 147, 249, 0.15); border: 2px solid #bd93f9; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">
-                            <h2 style="margin: 0; color: #bd93f9;">🚨 PENDING TRADES (${pendingList.length})</h2>
+                            <h2 style="margin: 0; color: #bd93f9;">[ALERT] PENDING TRADES (${pendingList.length})</h2>
                             <div style="display: flex; gap: 8px;">
-                                <button class="btn btn-green" style="padding: 6px 12px; font-size: 0.85rem;" onclick="decideAllTrades(true)">✔ APPROVE ALL</button>
-                                <button class="btn btn-red" style="padding: 6px 12px; font-size: 0.85rem;" onclick="decideAllTrades(false)">✖ REJECT ALL</button>
+                                <button class="btn btn-green" style="padding: 6px 12px; font-size: 0.85rem;" onclick="decideAllTrades(true)">APPROVE ALL</button>
+                                <button class="btn btn-red" style="padding: 6px 12px; font-size: 0.85rem;" onclick="decideAllTrades(false)">REJECT ALL</button>
                             </div>
                         </div>
                         <div style="display: flex; flex-direction: column; gap: 10px;">
@@ -403,8 +403,8 @@
                                 </div>
                             </div>
                             <div style="display: flex; gap: 6px;">
-                                <button class="btn btn-green" style="padding: 6px 14px;" onclick="decideTrade(true, ${t.id})">✔</button>
-                                <button class="btn btn-red" style="padding: 6px 14px;" onclick="decideTrade(false, ${t.id})">✖</button>
+                                <button class="btn btn-green" style="padding: 6px 14px;" onclick="decideTrade(true, ${t.id})"></button>
+                                <button class="btn btn-red" style="padding: 6px 14px;" onclick="decideTrade(false, ${t.id})">X</button>
                             </div>
                         </div>
                     `;
@@ -439,7 +439,7 @@
                 currentPairs = [...data.favorite_pairs];
                 const display = document.getElementById('favorite-pairs-display');
                 display.innerHTML = currentPairs.map(p => 
-                    `<div class="pair-tag">${p} <span onclick="removePair('${p}')">✖</span></div>`
+                    `<div class="pair-tag">${p} <span onclick="removePair('${p}')">X</span></div>`
                 ).join('');
                 
                 // If keys exist, show placeholder indicating they are saved
@@ -539,7 +539,7 @@
         function removePair(pair) {
             currentPairs = currentPairs.filter(p => p !== pair);
             document.getElementById('favorite-pairs-display').innerHTML = currentPairs.map(p => 
-                `<div class="pair-tag">${p} <span onclick="removePair('${p}')">✖</span></div>`
+                `<div class="pair-tag">${p} <span onclick="removePair('${p}')">X</span></div>`
             ).join('');
         }
 

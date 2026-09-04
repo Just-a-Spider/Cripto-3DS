@@ -1,0 +1,220 @@
+:root {
+    --bg-color: #1e1e2e;
+    --card-bg: #282a36;
+    --text: #f8f8f2;
+    --accent: #8be9fd;
+    --green: #50fa7b;
+    --red: #ff5555;
+    --yellow: #f1fa8c;
+    --btn-shadow: #191a21;
+}
+body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg-color);
+    color: var(--text);
+    margin: 0;
+    padding: 20px;
+}
+.container { max-width: 900px; margin: 0 auto; }
+h1, h2, h3 { margin-top: 0; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+
+.card { 
+    background: var(--card-bg); 
+    border-radius: 16px; 
+    padding: 20px; 
+    margin-bottom: 20px; 
+    box-shadow: 0 4px 0 var(--btn-shadow);
+    border: 2px solid var(--btn-shadow);
+}
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+
+/* Controls Bar Responsive Layout */
+.controls-bar {
+    margin-top: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+}
+
+/* 3DS Chunky Responsive Buttons */
+.btn { 
+    border: 2px solid var(--btn-shadow); 
+    padding: 10px 16px; 
+    border-radius: 10px; 
+    font-weight: 800; 
+    font-size: 0.85rem;
+    cursor: pointer; 
+    transition: all 0.1s;
+    box-shadow: 0 4px 0 var(--btn-shadow);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    min-width: 110px;
+    max-width: 180px;
+    text-align: center;
+    box-sizing: border-box;
+}
+.btn:active {
+    transform: translateY(4px);
+    box-shadow: 0 0 0 transparent;
+}
+.btn-green { background: var(--green); color: #000; }
+.btn-red { background: var(--red); color: #000; }
+.btn-yellow { background: var(--yellow); color: #000; }
+.btn-accent { background: var(--accent); color: #000; }
+
+/* Badges */
+.badge { padding: 8px 14px; border-radius: 8px; font-size: 0.9rem; font-weight: 800; border: 2px solid var(--btn-shadow); white-space: nowrap; }
+.badge-active { background: var(--green); color: #000; }
+.badge-paused { background: var(--red); color: #000; }
+
+.price-list { list-style: none; padding: 0; margin: 0; }
+.price-item { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    padding: 8px 0; 
+    border-bottom: 2px dashed var(--btn-shadow); 
+    font-size: 1rem; 
+    min-height: 44px;
+    box-sizing: border-box;
+}
+.price-item:last-child { border-bottom: none; }
+
+.trade-banner { 
+    background: var(--yellow); 
+    color: #000;
+    border: 4px solid #000; 
+    padding: 20px; 
+    border-radius: 16px; 
+    margin-bottom: 20px;
+    box-shadow: 0 6px 0 #000;
+}
+
+/* Settings Modal */
+#settings-modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.6);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+}
+.modal-content {
+    background: var(--card-bg);
+    padding: 30px;
+    border-radius: 20px;
+    width: 90%;
+    max-width: 700px;
+    max-height: 90vh;
+    overflow-y: auto;
+    border: 4px solid var(--btn-shadow);
+    box-shadow: 0 8px 0 var(--btn-shadow);
+}
+
+input[type="number"], input[type="text"], input[type="password"], select { 
+    background: var(--bg-color); 
+    border: 2px solid var(--btn-shadow); 
+    color: var(--text); 
+    padding: 10px; 
+    border-radius: 8px; 
+    width: 100%;
+    box-sizing: border-box;
+    font-weight: bold;
+}
+
+label { font-weight: bold; font-size: 0.9rem; margin-bottom: 5px; display: inline-block; }
+
+.ws-status { font-size: 0.9rem; font-weight: bold; color: var(--green); }
+
+.terminal { 
+    background: #000; 
+    border: 4px solid var(--btn-shadow); 
+    border-radius: 12px; 
+    padding: 15px; 
+    font-family: monospace; 
+    height: 180px; 
+    overflow-y: scroll; 
+    color: #00ff66;
+    margin-bottom: 20px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}
+.log-error { color: #ff5555; }
+.log-warn { color: #f1fa8c; }
+
+.big-number {
+    font-size: 3.5rem;
+    font-weight: 900;
+    color: var(--accent);
+    text-align: center;
+    margin: 10px 0;
+    text-shadow: 3px 3px 0 var(--btn-shadow);
+}
+
+.pair-tag { display: inline-block; background: var(--btn-shadow); color: var(--card-bg); padding: 4px 8px; border-radius: 6px; margin: 2px 4px 2px 0; font-size: 0.85rem; font-weight: bold; }
+.pair-tag span { cursor: pointer; color: var(--red); margin-left: 5px; font-weight: 900; }
+
+.rsi-pill {
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 0 6px;
+    height: 22px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+.rsi-oversold {
+    background: rgba(80, 250, 123, 0.2);
+    color: #50fa7b;
+    border: 1px solid #50fa7b;
+}
+.rsi-overbought {
+    background: rgba(255, 85, 85, 0.2);
+    color: #ff5555;
+    border: 1px solid #ff5555;
+}
+.rsi-neutral {
+    background: rgba(139, 233, 253, 0.15);
+    color: #8be9fd;
+    border: 1px solid rgba(139, 233, 253, 0.4);
+}
+.bb-pill {
+    font-size: 0.72rem;
+    font-weight: 800;
+    padding: 0 6px;
+    height: 22px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--comment);
+    border: 1px solid var(--btn-shadow);
+    margin-left: 6px;
+}
+
+/* PIN Lock Modal */
+#pin-modal {
+    display: flex;
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: var(--bg-color);
+    z-index: 9999;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+}
+#pin-modal h1 { color: var(--accent); margin-bottom: 20px; font-size: 3rem; }
+#pin-input { font-size: 2rem; text-align: center; margin-bottom: 20px; max-width: 300px; padding: 15px; }

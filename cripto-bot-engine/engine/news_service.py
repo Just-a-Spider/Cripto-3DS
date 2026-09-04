@@ -94,19 +94,31 @@ class CryptoPanicProvider(BaseNewsProvider):
 
         return items
 
+_grounding_circuit_breaker_until: float = 0.0
+
 class GoogleSearchGroundingProvider(BaseNewsProvider):
     """
     Leverages native Google Search Grounding (types.Tool(google_search=types.GoogleSearch()))
     via official google-genai SDK to fetch live, real-time web news, SEC catalysts, and market events.
+    Disabled by default on free tier accounts to prevent HTTP 429 quota exhaustion.
     """
     def __init__(self, api_key: str = "", fallback_provider: Optional[BaseNewsProvider] = None):
         self.api_key = api_key
         self.fallback = fallback_provider or CryptoPanicProvider()
 
     async def fetch_news(self, assets: List[str]) -> List[NewsItem]:
+        global _grounding_circuit_breaker_until
         from engine.state import state
+
+        # Free tier safety: bypass grounding if disabled or currently on circuit-breaker cooldown
+        if not getattr(state, "enable_search_grounding", False):
+            return await self.fallback.fetch_news(assets)
+
+        now = time.time()
+        if now < _grounding_circuit_breaker_until:
+            return await self.fallback.fetch_news(assets)
+
         key = self.api_key or getattr(state, "gemini_api_key", "")
-        
         if not key:
             return await self.fallback.fetch_news(assets)
 
@@ -125,7 +137,7 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
             )
             
             loop = asyncio.get_running_loop()
-            model_name = getattr(state, "gemini_search_model", "gemini-3.5-flash").replace("models/", "")
+            model_name = getattr(state, "gemini_search_model", "gemini-3.1-flash-lite").replace("models/", "")
             
             response = await loop.run_in_executor(
                 None,
@@ -178,7 +190,7 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
         except ImportError:
             # Pure HTTP REST Grounding Caller for armv8l Termux
             try:
-                model_name = getattr(state, "gemini_search_model", "gemini-3.5-flash").replace("models/", "")
+                model_name = getattr(state, "gemini_search_model", "gemini-3.1-flash-lite").replace("models/", "")
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
                 target_list = assets if assets else ["BTC", "ETH", "SOL", "BNB"]
                 assets_str = ", ".join(target_list)
@@ -189,7 +201,7 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
                     "generationConfig": {"temperature": 0.2}
                 }
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
+                    async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=8.0)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             candidates = data.get("candidates", [])
@@ -204,9 +216,9 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
                                     if title and uri:
                                         matched_asset = "MARKET"
                                         for a in assets:
-                                            if a.upper() in title.upper():
-                                                matched_asset = a.upper()
-                                                break
+                                             if a.upper() in title.upper():
+                                                 matched_asset = a.upper()
+                                                 break
                                         tag = "NEUTRAL"
                                         if any(k in title.lower() for k in ["hack", "sec", "lawsuit", "delist", "crash", "ban"]):
                                             tag = "HIGH_RISK"
@@ -227,11 +239,19 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
                                     logger.info(f"Google Search Grounding REST API retrieved {len(items)} live web news items.")
                                     return items[:10]
                         else:
-                            logger.info(f"Google Search Grounding returned HTTP {resp.status} (delegating cleanly to CryptoPanic provider).")
+                            if resp.status in (400, 429):
+                                _grounding_circuit_breaker_until = time.time() + 86400.0
+                                logger.warning(f"Google Search Grounding returned HTTP {resp.status}. Cooling down grounding tool for 24h (delegating cleanly to CryptoPanic).")
+                            else:
+                                logger.info(f"Google Search Grounding returned HTTP {resp.status} (delegating cleanly to CryptoPanic provider).")
             except Exception as e_rest:
                 logger.debug(f"Google Search Grounding REST note: {e_rest}")
         except Exception as e:
-            logger.info(f"Google Search Grounding unavailable ({e}). Delegating to CryptoPanic provider.")
+            if "429" in str(e) or "quota" in str(e).lower():
+                _grounding_circuit_breaker_until = time.time() + 86400.0
+                logger.warning(f"Google Search Grounding quota error: {e}. Cooled down for 24h.")
+            else:
+                logger.info(f"Google Search Grounding unavailable ({e}). Delegating to CryptoPanic provider.")
 
         return await self.fallback.fetch_news(assets)
 
@@ -240,7 +260,7 @@ class NewsServiceManager:
     Manages news fetching, caching, and background periodic refresh.
     """
     def __init__(self, provider: Optional[BaseNewsProvider] = None):
-        self.provider = provider or GoogleSearchGroundingProvider()
+        self.provider = provider or CryptoPanicProvider()
         self.cached_news: List[NewsItem] = []
         self.last_fetched: float = 0.0
         self.cache_ttl: float = 2700.0  # 45 minutes

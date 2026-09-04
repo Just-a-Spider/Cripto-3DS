@@ -22,6 +22,7 @@ def parse_args(args=None):
     parser.add_argument("--discord-channel", dest="discord_channel", default=None, help="Discord Channel ID")
     parser.add_argument("--gemini-key", dest="gemini_key", default=None, help="Google Gemini API Key")
     parser.add_argument("--gemini-model", dest="gemini_model", default="gemini-3.1-flash-lite", help="Gemini Model")
+    parser.add_argument("--groq-key", dest="groq_key", default=None, help="Groq Cloud API Key (optional free secondary LLM)")
     parser.add_argument("--env-path", dest="env_path", default=None, help="Custom destination path for .env file")
     parser.add_argument("--non-interactive", dest="non_interactive", action="store_true", help="Do not prompt interactively; use defaults or flags")
     return parser.parse_args(args)
@@ -129,6 +130,15 @@ def setup_environment(cli_args=None):
     else:
         gemini_model = existing_values.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
+    # Groq Key (optional)
+    if cli_args.groq_key is not None:
+        groq_key = cli_args.groq_key.strip()
+    else:
+        groq_key = existing_values.get("GROQ_API_KEY", "")
+
+    groq_model = existing_values.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+    enable_grounding = existing_values.get("ENABLE_SEARCH_GROUNDING", "false")
+
     server_port = existing_values.get("SERVER_3DS_PORT", "7343")
     web_port = existing_values.get("WEB_PORT", "7344")
     headless = existing_values.get("HEADLESS", "true")
@@ -154,12 +164,41 @@ DISCORD_WEBHOOK_URL={existing_values.get('DISCORD_WEBHOOK_URL', '')}
 # --- Google AI Studio (Gemini Free Tier) ---
 GEMINI_API_KEY={gemini_key}
 GEMINI_MODEL={gemini_model}
+ENABLE_SEARCH_GROUNDING={enable_grounding}
+
+# --- Secondary Free LLM Backup (Optional Groq Cloud) ---
+GROQ_API_KEY={groq_key}
+GROQ_MODEL={groq_model}
 
 # --- Server Ports & Security ---
 AUTH_PIN={pin}
 SERVER_3DS_PORT={server_port}
 WEB_PORT={web_port}
 HEADLESS={headless}
+
+# --- Risk Management & Watchlist ---
+MAX_TRADE_USDT={existing_values.get('MAX_TRADE_USDT', '50.0')}
+MAX_DAILY_SPEND_USDT={existing_values.get('MAX_DAILY_SPEND_USDT', '200.0')}
+MIN_USDT_RESERVE={existing_values.get('MIN_USDT_RESERVE', '20.0')}
+REQUIRE_HUMAN_APPROVAL={existing_values.get('REQUIRE_HUMAN_APPROVAL', 'true')}
+FAVORITE_PAIRS={existing_values.get('FAVORITE_PAIRS', 'BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT')}
+
+# --- Trading Strategy Parameters ---
+DCA_INTERVAL={existing_values.get('DCA_INTERVAL', '3600')}
+RSI_THRESHOLD={existing_values.get('RSI_THRESHOLD', '30.0')}
+TP_PERCENT={existing_values.get('TP_PERCENT', '5.0')}
+SL_PERCENT={existing_values.get('SL_PERCENT', '3.0')}
+TRAILING_ENABLED={existing_values.get('TRAILING_ENABLED', 'true')}
+TRAILING_ACTIVATION_PERCENT={existing_values.get('TRAILING_ACTIVATION_PERCENT', '3.0')}
+TRAILING_DELTA_PERCENT={existing_values.get('TRAILING_DELTA_PERCENT', '1.5')}
+PARTIAL_TP_ENABLED={existing_values.get('PARTIAL_TP_ENABLED', 'true')}
+PARTIAL_TP_PERCENT={existing_values.get('PARTIAL_TP_PERCENT', '4.0')}
+PARTIAL_TP_RATIO={existing_values.get('PARTIAL_TP_RATIO', '0.5')}
+BULL_REGIME_DIP_ENABLED={existing_values.get('BULL_REGIME_DIP_ENABLED', 'true')}
+BULL_RSI_THRESHOLD={existing_values.get('BULL_RSI_THRESHOLD', '42.0')}
+AI_SCOUT_ENABLED={existing_values.get('AI_SCOUT_ENABLED', 'true')}
+AI_SCOUT_INTERVAL_HOURS={existing_values.get('AI_SCOUT_INTERVAL_HOURS', '2.0')}
+AI_SCOUT_MIN_CONFIDENCE={existing_values.get('AI_SCOUT_MIN_CONFIDENCE', '0.85')}
 """
 
     env_path.parent.mkdir(parents=True, exist_ok=True)

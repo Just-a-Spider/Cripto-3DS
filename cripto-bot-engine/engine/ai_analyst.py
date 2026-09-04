@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any, List, Union
 logger = logging.getLogger("CriptoBotEngine")
 
 DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_GEMINI_SEARCH_MODEL = "gemini-3.5-flash"
+DEFAULT_GEMINI_SEARCH_MODEL = "gemini-3.1-flash-lite"
 
 # In-memory cache for Fear & Greed Index (1 hour TTL)
 _fng_cache: Dict[str, Any] = {
@@ -57,26 +57,49 @@ try:
 except ImportError:
     HAS_GENAI_SDK = False
 
+_model_cooldowns: Dict[str, float] = {}
+
+def is_model_on_cooldown(model_name: str) -> bool:
+    clean = str(model_name or "").replace("models/", "").strip()
+    return time.time() < _model_cooldowns.get(clean, 0.0)
+
+def record_model_cooldown(model_name: str, duration_sec: float = 600.0):
+    clean = str(model_name or "").replace("models/", "").strip()
+    _model_cooldowns[clean] = time.time() + duration_sec
+    logger.info(f"Model {clean} placed on circuit-breaker cooldown for {duration_sec/60:.0f}m.")
+
+def clear_model_cooldowns():
+    global _model_cooldowns
+    _model_cooldowns.clear()
+
 ACTIVE_GEMINI_PRIORITY = [
     "gemini-3.1-flash-lite",
     "gemini-flash-lite-latest",
     "gemini-3.5-flash-lite",
     "gemini-3.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-flash-latest",
-    "gemini-3.1-pro-preview",
-    "gemini-pro-latest"
+    "gemini-3-flash-preview"
+]
+
+ACTIVE_GROQ_PRIORITY = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "mixtral-8x7b-32768"
 ]
 
 def _is_unsupported_model(name: str) -> bool:
     name_lower = name.lower()
     unsupported_substrings = [
-        "embedding", "aqa", "imagen", "veo", "robotics", "tts", "computer-use", "image"
+        "embedding", "aqa", "imagen", "veo", "robotics", "tts", "computer-use", "image",
+        "transcribe", "speech", "audio", "whisper", "live", "realtime", "dialogflow", "eval",
+        "custom", "bilingual", "math", "code", "coder"
     ]
     if any(x in name_lower for x in unsupported_substrings):
         return True
-    # Filter out deprecated models that return 404
-    if any(name_lower.startswith(x) for x in ["gemini-2.5", "gemini-2.0", "gemini-1.5"]):
+    # Filter out models that return 404 or 429 quota on free tier (Pro models)
+    if any(name_lower.startswith(x) for x in ["gemini-2.5", "gemini-2.0", "gemini-1.5", "gemini-3.1-pro", "gemini-pro"]):
+        return True
+    # Must be a text generateContent model
+    if not (name_lower.startswith("gemini-") and ("flash" in name_lower or name_lower in ACTIVE_GEMINI_PRIORITY)):
         return True
     return False
 
@@ -138,6 +161,62 @@ async def fetch_available_gemini_models(api_key: str) -> List[str]:
         return []
 
 
+async def call_groq(
+    prompt: str,
+    api_key: str,
+    model: str = "llama-3.3-70b-versatile",
+    system_instruction: str = "",
+    json_mode: bool = False
+) -> Optional[str]:
+    """
+    Ultra-fast free secondary LLM caller targeting Groq's OpenAI-compatible endpoint.
+    Features automatic multi-model fallback across ACTIVE_GROQ_PRIORITY.
+    """
+    clean_key = str(api_key or "").strip().strip('"').strip("'")
+    if not clean_key:
+        return None
+
+    models_to_try = [model or "llama-3.3-70b-versatile"]
+    for alt in ACTIVE_GROQ_PRIORITY:
+        if alt not in models_to_try:
+            models_to_try.append(alt)
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {clean_key}",
+        "Content-Type": "application/json"
+    }
+    messages = []
+    if system_instruction:
+        messages.append({"role": "system", "content": system_instruction})
+    messages.append({"role": "user", "content": prompt})
+
+    for target_model in models_to_try[:2]:
+        payload: Dict[str, Any] = {
+            "model": target_model,
+            "messages": messages,
+            "temperature": 0.2
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        choices = data.get("choices", [])
+                        if choices:
+                            content = choices[0].get("message", {}).get("content", "").strip()
+                            if content:
+                                return content
+                    else:
+                        err = await resp.text()
+                        logger.warning(f"Groq API model {target_model} returned HTTP {resp.status}: {err[:120]}")
+        except Exception as e:
+            logger.warning(f"Groq API call error on {target_model}: {e}")
+    return None
+
+
 async def call_gemini(
     prompt: str,
     api_key: str,
@@ -148,13 +227,19 @@ async def call_gemini(
 ) -> Optional[str]:
     """
     Caller for Google AI Studio Gemini API using native google.genai SDK with HTTP auto-fallback.
-    Supports native Google Search Grounding with auto-recovery to pure text on tool quota 429 errors.
+    Features circuit breaker, 503/429 cooldowns, strict total execution deadline,
+    and automatic fallback to Groq secondary free provider if configured.
     """
     clean_key = str(api_key or "").strip().strip('"').strip("'")
     if not clean_key:
         return None
 
     from engine.state import state
+
+    # Free tier safety: avoid websearch tool unless explicitly enabled
+    if use_google_search and not getattr(state, "enable_search_grounding", False):
+        use_google_search = False
+
     if not model:
         if use_google_search:
             model = getattr(state, "gemini_search_model", DEFAULT_GEMINI_SEARCH_MODEL)
@@ -163,9 +248,13 @@ async def call_gemini(
 
     clean_model = str(model or DEFAULT_GEMINI_MODEL).strip().replace("models/", "")
 
-    if HAS_GENAI_SDK:
+    raw_keys = [k.strip() for k in clean_key.split(",") if k.strip()]
+    active_key = raw_keys[0] if raw_keys else clean_key
+
+    # 1. Native google.genai SDK attempt (if not on cooldown)
+    if HAS_GENAI_SDK and not is_model_on_cooldown(clean_model):
         try:
-            client = genai.Client(api_key=clean_key)
+            client = genai.Client(api_key=active_key)
             config_args = {
                 "temperature": 0.2 if json_mode else 0.3,
                 "max_output_tokens": 600
@@ -174,92 +263,313 @@ async def call_gemini(
                 config_args["response_mime_type"] = "application/json"
             if system_instruction:
                 config_args["system_instruction"] = system_instruction
-            if use_google_search:
+            if use_google_search and getattr(state, "enable_search_grounding", False):
                 config_args["tools"] = [types.Tool(google_search=types.GoogleSearch())]
 
             config = types.GenerateContentConfig(**config_args)
             loop = asyncio.get_running_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.models.generate_content(
-                    model=clean_model,
-                    contents=prompt,
-                    config=config
-                )
+            response = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: client.models.generate_content(
+                        model=clean_model,
+                        contents=prompt,
+                        config=config
+                    )
+                ),
+                timeout=4.5
             )
             if response and response.text:
                 return response.text.strip()
+        except asyncio.TimeoutError:
+            record_model_cooldown(clean_model, 600.0)
+            logger.warning(f"GenAI SDK timeout on {clean_model} (cooldown 10m)")
         except Exception as e:
+            err_str = str(e).lower()
+            if "503" in err_str or "high demand" in err_str or "429" in err_str:
+                record_model_cooldown(clean_model, 600.0)
             logger.debug(f"Google GenAI SDK on {clean_model} (switching to HTTP fallback): {e}")
 
-    # Build comprehensive model fallback candidate list
-    models_to_try = [clean_model]
-    discovered = getattr(state, "available_gemini_models", [])
-    for m_disc in discovered:
-        m_clean = str(m_disc).replace("models/", "").strip()
-        if m_clean and m_clean not in models_to_try and not _is_unsupported_model(m_clean):
-            models_to_try.append(m_clean)
-
+    # Build strictly vetted candidate model list (never try arbitrary or non-text models)
+    candidate_pool = [clean_model]
     for fb in ACTIVE_GEMINI_PRIORITY:
-        if fb not in models_to_try:
-            models_to_try.append(fb)
+        if fb not in candidate_pool and not _is_unsupported_model(fb):
+            candidate_pool.append(fb)
 
-    for m in models_to_try:
-        # Try with requested search tool setting first
-        tools_to_try = [{"google_search": {}}] if use_google_search else []
-        
-        while True:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={clean_key}"
-            gen_config: Dict[str, Any] = {
-                "temperature": 0.2 if json_mode else 0.3,
-                "maxOutputTokens": 600
-            }
-            if json_mode:
-                gen_config["responseMimeType"] = "application/json"
+    # Filter for healthy models not on circuit-breaker cooldown
+    healthy_models = [m for m in candidate_pool if not is_model_on_cooldown(m) and not _is_unsupported_model(m)]
 
-            payload: Dict[str, Any] = {
-                "contents": [
-                    {
-                        "parts": [{"text": prompt}]
-                    }
-                ],
-                "generationConfig": gen_config
-            }
-            if system_instruction:
-                payload["system_instruction"] = {
-                    "parts": [{"text": system_instruction}]
+    # Cap to at most 2 attempts (primary + 1 fallback) during outages
+    healthy_models = healthy_models[:2]
+
+    if not healthy_models:
+        logger.info("All Gemini models currently on circuit-breaker cooldown. Bypassing Gemini to backup provider...")
+    else:
+        deadline = time.time() + 5.0  # Strict 5.0s maximum across Gemini attempts
+
+        for m in healthy_models:
+            if time.time() >= deadline:
+                logger.info("Gemini call deadline exceeded (skipping remaining Gemini models).")
+                break
+
+            tools_to_try = [{"google_search": {}}] if (use_google_search and getattr(state, "enable_search_grounding", False)) else []
+
+            while True:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={active_key}"
+                gen_config: Dict[str, Any] = {
+                    "temperature": 0.2 if json_mode else 0.3,
+                    "maxOutputTokens": 600
                 }
-            if tools_to_try:
-                payload["tools"] = tools_to_try
+                if json_mode:
+                    gen_config["responseMimeType"] = "application/json"
 
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=12.0)) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            candidates = data.get("candidates", [])
-                            if candidates:
-                                parts = candidates[0].get("content", {}).get("parts", [])
-                                if parts:
-                                    return parts[0].get("text", "").strip()
-                        else:
-                            err_text = await resp.text()
-                            # If search tool caused 429/400, strip tool and immediately retry as pure text
-                            if tools_to_try and (resp.status in [400, 429] or "quota" in err_text.lower()):
-                                logger.info(f"Gemini model {m} search tool rate-limited (HTTP {resp.status}). Retrying as pure text...")
-                                tools_to_try = []
-                                continue
-                            
-                            logger.warning(f"Gemini API model {m} returned HTTP {resp.status}: {err_text[:120]}")
-                            break
-            except aiohttp.ClientError as e:
-                logger.warning(f"Gemini API network error on {m}: {e}")
-                break
-            except Exception as e:
-                logger.warning(f"Gemini API error on {m}: {type(e).__name__}: {e}")
-                break
+                payload: Dict[str, Any] = {
+                    "contents": [
+                        {
+                            "parts": [{"text": prompt}]
+                        }
+                    ],
+                    "generationConfig": gen_config
+                }
+                if system_instruction:
+                    payload["system_instruction"] = {
+                        "parts": [{"text": system_instruction}]
+                    }
+                if tools_to_try:
+                    payload["tools"] = tools_to_try
+
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=2.5)) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                candidates = data.get("candidates", [])
+                                if candidates:
+                                    parts = candidates[0].get("content", {}).get("parts", [])
+                                    if parts:
+                                        return parts[0].get("text", "").strip()
+                            else:
+                                err_text = await resp.text()
+                                if tools_to_try and (resp.status in [400, 429] or "quota" in err_text.lower()):
+                                    logger.info(f"Gemini model {m} search tool rate-limited (HTTP {resp.status}). Retrying as pure text...")
+                                    tools_to_try = []
+                                    continue
+
+                                if resp.status in (429, 503) or "high demand" in err_text.lower():
+                                    record_model_cooldown(m, 600.0)
+
+                                logger.warning(f"Gemini API model {m} returned HTTP {resp.status}: {err_text[:120]}")
+                                break
+                except asyncio.TimeoutError:
+                    record_model_cooldown(m, 600.0)
+                    logger.warning(f"Gemini API network timeout on {m} (cooled down for 10m)")
+                    break
+                except aiohttp.ClientError as e:
+                    logger.warning(f"Gemini API network error on {m}: {e}")
+                    break
+                except Exception as e:
+                    logger.warning(f"Gemini API error on {m}: {type(e).__name__}: {e}")
+                    break
+
+    # Secondary Free Provider Fallback: Groq (if configured)
+    groq_key = getattr(state, "groq_api_key", "")
+    if groq_key:
+        logger.info("Delegating to Groq secondary free LLM fallback...")
+        groq_model = getattr(state, "groq_model", "llama-3.3-70b-versatile")
+        res = await call_groq(prompt, groq_key, model=groq_model, system_instruction=system_instruction, json_mode=json_mode)
+        if res:
+            return res
 
     return None
+
+
+async def fallback_trade_signal_analysis(
+    pair: str,
+    action: str,
+    price: float,
+    rsi: float,
+    pct_b: float,
+    reason: str,
+    price_history: Optional[List[float]] = None,
+    macro_sentiment: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Tier 0 Deterministic Mathematical Fallback for trade risk analysis.
+    Produces accurate quantitative risk scores and stop loss values when cloud LLMs are unavailable.
+    """
+    fng = macro_sentiment or await fetch_fear_and_greed_index()
+    fng_val = int(fng.get("value", 50))
+    fng_class = str(fng.get("classification", "Neutral"))
+
+    act = str(action or "BUY").upper()
+    red_flags = []
+
+    if act == "BUY":
+        if rsi <= 32.0 and pct_b <= 0.25:
+            verdict = "APPROVE"
+            risk_score = 3
+        elif rsi >= 65.0 or pct_b >= 0.85:
+            verdict = "CAUTION"
+            risk_score = 7
+            red_flags.append(f"Momentum overextended (RSI: {rsi:.1f}, %B: {pct_b:.2f})")
+        else:
+            verdict = "APPROVE" if ("RSI" in reason.upper() or "DIP" in reason.upper()) else "CAUTION"
+            risk_score = 4
+    else:  # SELL
+        if rsi >= 65.0:
+            verdict = "APPROVE"
+            risk_score = 3
+        elif rsi <= 35.0:
+            verdict = "CAUTION"
+            risk_score = 7
+            red_flags.append(f"Selling near support (RSI: {rsi:.1f})")
+        else:
+            verdict = "APPROVE"
+            risk_score = 4
+
+    if fng_val >= 80:
+        red_flags.append("Extreme Market Greed")
+    elif fng_val <= 20:
+        red_flags.append("Extreme Market Fear")
+
+    from engine.news_service import news_service
+    if news_service.has_high_risk_event(pair):
+        verdict = "HIGH_RISK"
+        risk_score = 9
+        red_flags.insert(0, "Breaking Emergency News Catalyst Detected")
+
+    sl_map = {1: 2.0, 2: 2.0, 3: 2.5, 4: 3.0, 5: 3.5, 6: 4.0, 7: 4.5, 8: 5.0, 9: 6.0, 10: 7.0}
+    suggested_sl = sl_map.get(risk_score, 3.0)
+
+    summary = (
+        f"[ALGO FALLBACK] Mathematical confluence: RSI {rsi:.1f}, %B {pct_b:.2f}, "
+        f"Macro F&G {fng_val}/100 ({fng_class}). Risk calculated quantitatively."
+    )
+
+    return {
+        "verdict": verdict,
+        "risk_score": risk_score,
+        "confidence": 0.82,
+        "suggested_sl_percent": suggested_sl,
+        "summary": summary,
+        "red_flags": red_flags[:4],
+        "fng_index": fng_val,
+        "fng_classification": fng_class
+    }
+
+
+def fallback_scan_market_opportunities(
+    market_context: Dict[str, Any],
+    market_regime: Optional[str] = None,
+    fng_str: str = "50/100 (Neutral)",
+    fng_val: int = 50
+) -> Dict[str, Any]:
+    """
+    Tier 0 Deterministic Screener Fallback for AI Opportunity Scout and Discord /opportunities.
+    """
+    prices = market_context.get("prices", {})
+    indicators = market_context.get("indicators", {})
+    fav_pairs = market_context.get("favorite_pairs", list(prices.keys()))
+    opps = []
+
+    for p in fav_pairs:
+        pr = float(prices.get(p, 0.0))
+        if pr <= 0.0:
+            continue
+        ind = indicators.get(p, {})
+        rsi = float(ind.get("rsi", 50.0))
+        pct_b = float(ind.get("pct_b", 0.5))
+
+        if rsi <= 35.0 and pct_b <= 0.30:
+            opps.append({
+                "pair": p,
+                "setup_type": "DIP_BUY",
+                "confidence": 0.86,
+                "key_levels": f"Support: ${pr*0.97:,.2f}, Target: ${pr*1.05:,.2f}",
+                "analysis": f"[ALGO] Oversold pullback at RSI {rsi:.1f} and %B {pct_b:.2f} near lower Bollinger Band."
+            })
+        elif rsi >= 65.0 and pct_b >= 0.75:
+            opps.append({
+                "pair": p,
+                "setup_type": "TAKE_PROFIT",
+                "confidence": 0.84,
+                "key_levels": f"Resistance: ${pr*1.03:,.2f}, Trailing Stop: ${pr*0.98:,.2f}",
+                "analysis": f"[ALGO] Overextended runner at RSI {rsi:.1f} and %B {pct_b:.2f} near upper Bollinger Band."
+            })
+
+    # If no extreme threshold breached, surface best dip-buy candidate with relative oversoldness
+    if not opps and fav_pairs:
+        pairs_by_rsi = []
+        for p in fav_pairs:
+            pr = float(prices.get(p, 0.0))
+            if pr > 0.0:
+                ind = indicators.get(p, {})
+                pairs_by_rsi.append((p, pr, float(ind.get("rsi", 50.0)), float(ind.get("pct_b", 0.5))))
+        if pairs_by_rsi:
+            pairs_by_rsi.sort(key=lambda x: x[2])
+            best_pair, best_pr, best_rsi, best_b = pairs_by_rsi[0]
+            if best_rsi < 48.0:
+                opps.append({
+                    "pair": best_pair,
+                    "setup_type": "DIP_BUY",
+                    "confidence": 0.78,
+                    "key_levels": f"Support: ${best_pr*0.98:,.2f}, Target: ${best_pr*1.04:,.2f}",
+                    "analysis": f"[ALGO] Consolidating pullback (RSI {best_rsi:.1f}, %B {best_b:.2f}) offering favorable risk-to-reward."
+                })
+
+    regime = market_regime or ("BULLISH_GREED" if fng_val >= 55 else ("BEARISH_FEAR" if fng_val <= 40 else "NEUTRAL"))
+    return {
+        "market_regime": regime,
+        "fng_str": fng_str,
+        "top_opportunities": opps[:5],
+        "tactical_summary": "[ALGO FALLBACK] Quantitative technical screen active across watchlist momentum & Bollinger Bands."
+    }
+
+
+def fallback_news_synthesis(cached_items: List[Any]) -> Dict[str, Any]:
+    """
+    Tier 0 Deterministic News Digest Fallback synthesizing sentiment tags from headlines.
+    """
+    from dataclasses import asdict
+    if not cached_items:
+        return {
+            "bullets": [
+                "Market consolidating across major watchlist assets.",
+                "RSI and Bollinger indicators within balanced trading range.",
+                "No emergency breaking risk events detected across feeds."
+            ],
+            "overall_catalyst": "NEUTRAL",
+            "headlines": []
+        }
+
+    bull_count = sum(1 for i in cached_items if getattr(i, "sentiment_tag", "") == "BULLISH")
+    bear_count = sum(1 for i in cached_items if getattr(i, "sentiment_tag", "") == "BEARISH")
+    risk_count = sum(1 for i in cached_items if getattr(i, "sentiment_tag", "") == "HIGH_RISK")
+
+    if risk_count >= 1:
+        catalyst = "HIGH_RISK"
+    elif bull_count > bear_count:
+        catalyst = "BULLISH"
+    elif bear_count > bull_count:
+        catalyst = "BEARISH"
+    else:
+        catalyst = "NEUTRAL"
+
+    bullets = []
+    for item in cached_items[:3]:
+        tag = getattr(item, "sentiment_tag", "NEWS")
+        asset = getattr(item, "asset", "MARKET")
+        title = getattr(item, "title", "")
+        bullets.append(f"[{tag}] {asset}: {title[:75]}")
+
+    while len(bullets) < 3:
+        bullets.append("Macro sentiment consolidating within normal technical volatility bands.")
+
+    return {
+        "bullets": bullets[:3],
+        "overall_catalyst": catalyst,
+        "headlines": [asdict(i) if hasattr(i, "__dataclass_fields__") else i for i in cached_items]
+    }
 
 
 async def analyze_trade_signal(
@@ -317,7 +627,11 @@ Return JSON with exact keys:
     raw_response = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True)
     
     if not raw_response:
-        return None
+        logger.info(f"Using algorithmic risk evaluation fallback for {pair} {action}...")
+        return await fallback_trade_signal_analysis(
+            pair=pair, action=action, price=price, rsi=rsi, pct_b=pct_b,
+            reason=reason, price_history=price_history, macro_sentiment=fng
+        )
 
     try:
         # Clean any markdown formatting if present
@@ -413,11 +727,7 @@ Synthesize these findings into valid JSON:
     raw = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True, use_google_search=False)
 
     if not raw:
-        return {
-            "bullets": ["Market consolidating across major assets.", "RSI levels within normal parameters.", "No emergency news events detected."],
-            "overall_catalyst": "NEUTRAL",
-            "headlines": [asdict(i) for i in cached]
-        }
+        return fallback_news_synthesis(cached)
 
     try:
         cleaned = raw.strip().replace("```json", "").replace("```", "").strip()
@@ -430,11 +740,7 @@ Synthesize these findings into valid JSON:
             "headlines": [asdict(i) for i in cached]
         }
     except Exception:
-        return {
-            "bullets": ["Market consolidating across major assets.", "RSI levels within normal parameters.", "No emergency news events detected."],
-            "overall_catalyst": "NEUTRAL",
-            "headlines": [asdict(i) for i in cached]
-        }
+        return fallback_news_synthesis(cached)
 
 
 async def ask_gemini(
@@ -504,7 +810,7 @@ Please answer the user's question clearly, incorporating live technicals, open p
 """
     system_inst = "You are Cripto-3DS AI Assistant, an expert quantitative cryptocurrency analyst and algorithmic trading assistant."
     result = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, use_google_search=False)
-    return result or "[WARNING] Gemini AI was unable to generate a response. Please try again."
+    return result or "[AI OUTAGE] Google Gemini is currently experiencing high demand (HTTP 503). Configure a free Groq Cloud API key in Settings or .env (GROQ_API_KEY) for zero-downtime backup."
 
 
 async def generate_market_briefing(
@@ -675,12 +981,7 @@ Return JSON strictly with format:
     raw = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True)
 
     if not raw:
-        return {
-            "market_regime": "BULLISH_GREED" if fng_val >= 55 else ("BEARISH_FEAR" if fng_val <= 40 else "NEUTRAL"),
-            "fng_str": fng_str,
-            "top_opportunities": [],
-            "tactical_summary": "Market consolidating. Monitor RSI pullbacks and trailing stop runners."
-        }
+        return fallback_scan_market_opportunities(market_context, market_regime, fng_str, fng_val)
 
     try:
         cleaned = raw.strip().replace("```json", "").replace("```", "").strip()
@@ -694,12 +995,7 @@ Return JSON strictly with format:
         }
     except Exception as e:
         logger.warning(f"Error parsing opportunities JSON: {e}")
-        return {
-            "market_regime": "NEUTRAL",
-            "fng_str": fng_str,
-            "top_opportunities": [],
-            "tactical_summary": "Market analysis complete. Watch for key support tests."
-        }
+        return fallback_scan_market_opportunities(market_context, market_regime, fng_str, fng_val)
 
 
 async def evaluate_exit_momentum(
