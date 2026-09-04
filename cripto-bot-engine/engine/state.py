@@ -1,20 +1,43 @@
 import os
 import base64
 from cryptography.fernet import Fernet
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 from binance import AsyncClient
 from dotenv import load_dotenv
 
 from engine.logger import logger, recent_logs
 from engine.risk_manager import risk_manager
 from engine.strategies import DCAStrategy, RSIStrategy, TPSLStrategy, calculate_bollinger_bands
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+
+STATIC_ENGINE_SALT = b"cripto-3ds-pbkdf2-salt-2026-moto"
 
 def get_cipher(pin: str) -> Fernet:
-    key = base64.urlsafe_b64encode(pin.zfill(32).encode('utf-8'))
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=STATIC_ENGINE_SALT,
+        iterations=100_000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(str(pin).encode('utf-8')))
     return Fernet(key)
 
-env_file = "testnet.env" if os.path.exists("testnet.env") else "config.env"
-load_dotenv(env_file)
+def get_legacy_cipher(pin: str) -> Fernet:
+    key = base64.urlsafe_b64encode(str(pin).zfill(32).encode('utf-8'))
+    return Fernet(key)
+
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+env_candidates = [
+    os.path.join(PROJECT_DIR, ".env"),
+    os.path.join(PROJECT_DIR, "testnet.env"),
+    os.path.join(PROJECT_DIR, "config.env"),
+    ".env", "testnet.env", "config.env"
+]
+for ec in env_candidates:
+    if os.path.exists(ec):
+        load_dotenv(ec)
+        break
 
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
@@ -50,6 +73,7 @@ class ConfigModel(BaseModel):
     discord_webhook_url: str = ""
     discord_bot_token: str = ""
     discord_channel_id: str = ""
+    allowed_discord_user_ids: Union[str, List[str], List[int]] = ""
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.1-flash-lite"
     gemini_search_model: str = "gemini-3.5-flash"
@@ -62,6 +86,8 @@ class BotState:
         self.is_active: bool = True
         self.testnet: bool = IS_TESTNET
         self.favorite_pairs: List[str] = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
+        env_discord_ids = os.getenv("ALLOWED_DISCORD_USER_IDS") or os.getenv("DISCORD_USER_ID", "")
+        self.allowed_discord_user_ids: List[str] = [x.strip() for x in env_discord_ids.split(",") if x.strip()]
         self.prices: Dict[str, float] = {
             "BTCUSDT": 0.0,
             "ETHUSDT": 0.0,
@@ -95,6 +121,12 @@ class BotState:
         self.ai_scout_enabled: bool = True
         self.ai_scout_interval_hours: float = 2.0
         self.ai_scout_min_confidence: float = 0.85
+
+    def is_discord_user_authorized(self, user_id: Any) -> bool:
+        if not user_id or not self.allowed_discord_user_ids:
+            return False
+        uid_str = str(user_id).strip()
+        return any(str(x).strip() == uid_str for x in self.allowed_discord_user_ids)
 
     @property
     def pending_trade(self) -> Optional[Dict[str, Any]]:
@@ -166,7 +198,8 @@ class BotState:
                 "max_daily_spend_usdt": risk_manager.max_daily_spend_usdt,
                 "min_usdt_reserve": risk_manager.min_usdt_reserve,
                 "require_human_approval": risk_manager.require_human_approval,
-                "auth_pin": self.auth_pin
+                "auth_pin_set": bool(self.auth_pin),
+                "allowed_discord_user_ids": self.allowed_discord_user_ids
             },
             "has_keys": bool(self.api_key and self.secret_key),
             "strategies": {
@@ -198,6 +231,8 @@ class BotState:
             "gemini_model": self.gemini_model,
             "gemini_search_model": self.gemini_search_model,
             "has_gemini": bool(self.gemini_api_key),
+            "has_pin": bool(self.auth_pin),
+            "allowed_discord_user_ids": list(self.allowed_discord_user_ids),
             "available_gemini_models": self.available_gemini_models,
             "logs": list(recent_logs)
         }

@@ -228,7 +228,11 @@ async def decide_trade(approved: bool, trade_id: Optional[int] = None, pair: Opt
                         exec_usdt = real_usdt
                     logger.info(f"Binance order executed: {order_id} at avg fill price ${exec_price:.4f}")
                 except Exception as e:
-                    logger.error(f"Binance order failed: {e}")
+                    err_msg = str(e)
+                    logger.error(f"Binance order failed: {err_msg}")
+                    await log_trade(trade['pair'], trade['action'], trade['amount_usdt'], trade['price'], f"FAILED: {err_msg[:60]}", is_testnet=state.testnet)
+                    await broadcast_state()
+                    return {"status": "error", "message": f"Binance order failed: {err_msg}", "trade": trade}
 
             # Calculate realized PnL if SELL
             realized_pnl_usdt = 0.0
@@ -241,7 +245,8 @@ async def decide_trade(approved: bool, trade_id: Optional[int] = None, pair: Opt
                     realized_pnl_percent = round(((exec_price - cost_basis) / cost_basis) * 100, 2)
                     logger.info(f"Realized PnL for {trade['pair']}: ${realized_pnl_usdt:+.2f} ({realized_pnl_percent:+.2f}%)")
 
-            risk_manager.record_spend(exec_usdt)
+            if trade['action'] == 'BUY':
+                risk_manager.record_spend(exec_usdt)
             await log_trade(
                 trade['pair'],
                 trade['action'],
@@ -480,3 +485,65 @@ async def execute_manual_buy(asset: str, usdt_amount: float, pin: str) -> Dict[s
         "price": round(exec_price, 4),
         "order_id": order_id
     }
+
+async def sync_binance_2026_trades(client=None, pairs: Optional[List[str]] = None) -> Dict[str, Any]:
+    """
+    Backfills all real Binance transaction fills from 2026-01-01T00:00:00Z to present
+    into the local SQLite database and reconciles accurate cost bases and realized PnL.
+    """
+    active_client = client or state.binance_client
+    if not active_client:
+        return {"status": "error", "message": "Binance client is not connected."}
+
+    # 2026-01-01T00:00:00Z in milliseconds: 1767225600000
+    start_time_ms = 1767225600000
+    raw_pairs = pairs or state.favorite_pairs or ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+    target_pairs = list(dict.fromkeys(raw_pairs))
+
+    total_imported = 0
+    from engine.db import order_exists, log_trade, deduplicate_trade_history
+
+    for pair in target_pairs:
+        try:
+            trades = await active_client.get_my_trades(symbol=pair, startTime=start_time_ms, limit=500)
+            if not trades:
+                continue
+
+            for t in trades:
+                oid = str(t.get("orderId", ""))
+                tid = str(t.get("id", ""))
+                trade_ref = f"{oid}_{tid}" if oid and tid else (oid or tid)
+                if not trade_ref:
+                    continue
+
+                if await order_exists(trade_ref, is_testnet=state.testnet):
+                    continue
+
+                is_buyer = bool(t.get("isBuyer"))
+                action = "BUY" if is_buyer else "SELL"
+                qty = float(t.get("qty", 0.0))
+                price = float(t.get("price", 0.0))
+                quote_qty = float(t.get("quoteQty", 0.0)) or (qty * price)
+                trade_time = float(t.get("time", 0.0)) / 1000.0
+
+                await log_trade(
+                    pair=pair,
+                    action=action,
+                    amount_usdt=round(quote_qty, 2),
+                    price=price,
+                    status="EXECUTED",
+                    order_id=trade_ref,
+                    is_testnet=state.testnet,
+                    timestamp=trade_time
+                )
+                total_imported += 1
+        except Exception as e:
+            logger.warning(f"Error syncing 2026 trades for {pair}: {e}")
+
+    await deduplicate_trade_history(state.testnet)
+    await refresh_cost_bases()
+    await risk_manager.refresh_daily_spend(state.testnet)
+    await broadcast_state()
+    logger.info(f"Synchronized 2026 Binance trade ledger: {total_imported} new fills imported.")
+    return {"status": "ok", "imported": total_imported}
+

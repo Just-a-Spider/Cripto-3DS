@@ -9,98 +9,118 @@ from engine.shared import save_strategy_state
 from engine.db import load_config_item
 
 async def listen_user_data(bm):
-    try:
-        async with bm.user_socket() as stream:
-            while True:
-                res = await stream.recv()
-                if res and res.get('e') == 'outboundAccountPosition':
-                    for bal in res.get('B', []):
-                        amt = float(bal['f'])
-                        if amt > 0 or bal['a'] in state.portfolio_balances:
-                            state.portfolio_balances[bal['a']] = amt
-                        if bal['a'] == 'USDT':
-                            state.usdt_balance = amt
-                    logger.info("WS Updated Portfolio Balances")
-                    await broadcast_state()
-    except Exception as e:
-        logger.error(f"User socket error: {e}")
+    backoff = 1
+    while True:
+        try:
+            async with bm.user_socket() as stream:
+                backoff = 1
+                while True:
+                    res = await stream.recv()
+                    if not res:
+                        break
+                    if res.get('e') == 'outboundAccountPosition':
+                        for bal in res.get('B', []):
+                            amt = float(bal['f'])
+                            if amt > 0 or bal['a'] in state.portfolio_balances:
+                                state.portfolio_balances[bal['a']] = amt
+                            if bal['a'] == 'USDT':
+                                state.usdt_balance = amt
+                        logger.info("WS Updated Portfolio Balances")
+                        await broadcast_state()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"User socket error, reconnecting in {backoff}s: {e}")
+            await asyncio.sleep(backoff)
+            backoff = min(30, backoff * 2)
 
 async def listen_market_data(bm):
-    try:
-        streams = [f"{pair.lower()}@ticker" for pair in state.favorite_pairs]
-        if not streams: return
-        async with bm.multiplex_socket(streams) as stream:
-            while True:
-                res = await stream.recv()
-                if res and 'data' in res:
-                    data = res['data']
-                    symbol = data.get('s')
-                    close_price = float(data.get('c', 0.0))
-                    if symbol in state.favorite_pairs:
-                        state.prices[symbol] = close_price
-                        
-                        if state.is_active and symbol not in [t.get('pair') for t in state.pending_trades.values()]:
-                            tpsl_sig = state.tpsl_strategy.evaluate_tpsl(state.prices, state.portfolio_balances, state.cost_bases, state.signal_cooldown_hours)
+    backoff = 1
+    while True:
+        try:
+            streams = [f"{pair.lower()}@ticker" for pair in state.favorite_pairs]
+            if not streams:
+                await asyncio.sleep(5)
+                continue
+            async with bm.multiplex_socket(streams) as stream:
+                backoff = 1
+                while True:
+                    res = await stream.recv()
+                    if not res:
+                        break
+                    if 'data' in res:
+                        data = res['data']
+                        symbol = data.get('s')
+                        close_price = float(data.get('c', 0.0))
+                        if symbol in state.favorite_pairs:
+                            state.prices[symbol] = close_price
                             
-                            sig = tpsl_sig
-                            max_buy = 0.0
-                            if not sig:
-                                max_buy = risk_manager.get_max_allowed_buy(state.usdt_balance)
-                                can_buy = max_buy >= 5.0
+                            if state.is_active and symbol not in [t.get('pair') for t in state.pending_trades.values()]:
+                                tpsl_sig = state.tpsl_strategy.evaluate_tpsl(state.prices, state.portfolio_balances, state.cost_bases, state.signal_cooldown_hours)
                                 
-                                dca_sig = None
-                                if can_buy:
-                                    dca_sig = state.dca_strategy.evaluate(state.prices, state.usdt_balance, state.favorite_pairs, state.signal_cooldown_hours)
+                                sig = tpsl_sig
+                                max_buy = 0.0
+                                if not sig:
+                                    max_buy = risk_manager.get_max_allowed_buy(state.usdt_balance)
+                                    can_buy = max_buy >= 5.0
                                     
-                                rsi_sig = state.rsi_strategy.evaluate(
-                                    state.prices, state.usdt_balance, state.favorite_pairs, 
-                                    state.portfolio_balances, state.cost_bases, state.signal_cooldown_hours, can_buy=can_buy
-                                )
-                                sig = dca_sig or rsi_sig
-                                
-                            if sig:
-                                amount_usdt = max_buy if sig['action'] == 'BUY' else risk_manager.max_trade_usdt
-                                amount_asset = sig.get("amount_asset", 0.0)
-                                if sig['action'] == 'SELL':
-                                    amount_usdt = amount_asset * sig['price']
+                                    dca_sig = None
+                                    if can_buy:
+                                        dca_sig = state.dca_strategy.evaluate(state.prices, state.usdt_balance, state.favorite_pairs, state.signal_cooldown_hours)
+                                        
+                                    rsi_sig = state.rsi_strategy.evaluate(
+                                        state.prices, state.usdt_balance, state.favorite_pairs, 
+                                        state.portfolio_balances, state.cost_bases, state.signal_cooldown_hours, can_buy=can_buy
+                                    )
+                                    sig = dca_sig or rsi_sig
                                     
-                                trade_id = int(time.time() * 1000)
-                                trade_payload = {
-                                    "id": trade_id,
-                                    "action": sig["action"],
-                                    "pair": sig["pair"],
-                                    "amount_usdt": amount_usdt,
-                                    "amount_asset": amount_asset,
-                                    "price": sig["price"],
-                                    "reason": sig.get("reason", sig.get("strategy")),
-                                    "created_at": time.time(),
-                                    "timeout_sec": 600
-                                }
-                                state.add_pending_trade(trade_payload)
-                                logger.info(f"Strategy signal generated: {sig} (ID: {trade_id})")
-                                await save_strategy_state()
+                                if sig:
+                                    amount_usdt = max_buy if sig['action'] == 'BUY' else risk_manager.max_trade_usdt
+                                    amount_asset = sig.get("amount_asset", 0.0)
+                                    if sig['action'] == 'SELL':
+                                        amount_usdt = amount_asset * sig['price']
+                                        
+                                    trade_id = int(time.time() * 1000)
+                                    trade_payload = {
+                                        "id": trade_id,
+                                        "action": sig["action"],
+                                        "pair": sig["pair"],
+                                        "amount_usdt": amount_usdt,
+                                        "amount_asset": amount_asset,
+                                        "price": sig["price"],
+                                        "reason": sig.get("reason", sig.get("strategy")),
+                                        "created_at": time.time(),
+                                        "timeout_sec": 600
+                                    }
+                                    state.add_pending_trade(trade_payload)
+                                    logger.info(f"Strategy signal generated: {sig} (ID: {trade_id})")
+                                    await save_strategy_state()
 
-                                if not risk_manager.require_human_approval:
-                                    logger.info(f"Auto-executing trade (approval not required): {sig['action']} {sig['pair']}")
-                                    from engine.trades import decide_trade
-                                    result = await decide_trade(approved=True, trade_id=trade_id)
-                                    logger.info(f"Auto-execution result: {result.get('status')}")
+                                    if not risk_manager.require_human_approval:
+                                        logger.info(f"Auto-executing trade (approval not required): {sig['action']} {sig['pair']}")
+                                        from engine.trades import decide_trade
+                                        result = await decide_trade(approved=True, trade_id=trade_id)
+                                        logger.info(f"Auto-execution result: {result.get('status')}")
 
-                                    from engine.notifier import send_discord_notification
-                                    cfg = await load_config_item("risk_config") or {}
-                                    subject = f"Crypto Bot Alert: {sig['action']} {sig['pair']} Auto-Executed"
-                                    body = f"Trade automatically executed (approval not required).\nAction: {sig['action']}\nPair: {sig['pair']}\nPrice: {sig['price']}\nStatus: {result.get('status')}"
-                                    asyncio.create_task(send_discord_notification(subject, body, cfg))
-                                else:
-                                    from engine.notifier import send_discord_notification
-                                    cfg = await load_config_item("risk_config") or {}
-                                    subject = f"Crypto Bot Alert: {sig['action']} {sig['pair']}"
-                                    body = f"A new {sig['action']} signal for {sig['pair']} requires your approval.\nPrice: {sig['price']}\nReason: {sig.get('reason', sig.get('strategy'))}"
-                                    asyncio.create_task(send_discord_notification(subject, body, cfg, trade=trade_payload))
+                                        from engine.notifier import send_discord_notification
+                                        cfg = await load_config_item("risk_config") or {}
+                                        subject = f"Crypto Bot Alert: {sig['action']} {sig['pair']} Auto-Executed"
+                                        body = f"Trade automatically executed (approval not required).\nAction: {sig['action']}\nPair: {sig['pair']}\nPrice: {sig['price']}\nStatus: {result.get('status')}"
+                                        asyncio.create_task(send_discord_notification(subject, body, cfg))
+                                    else:
+                                        from engine.notifier import send_discord_notification
+                                        cfg = await load_config_item("risk_config") or {}
+                                        subject = f"Crypto Bot Alert: {sig['action']} {sig['pair']}"
+                                        body = f"A new {sig['action']} signal for {sig['pair']} requires your approval.\nPrice: {sig['price']}\nReason: {sig.get('reason', sig.get('strategy'))}"
+                                        asyncio.create_task(send_discord_notification(subject, body, cfg, trade=trade_payload))
 
-                        await broadcast_state()
-    except Exception as e:
-        logger.error(f"Market socket error: {e}")
+                            await broadcast_state()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning(f"Market socket error, reconnecting in {backoff}s: {e}")
+            await asyncio.sleep(backoff)
+            backoff = min(30, backoff * 2)
 
 async def start_binance_websocket():
     if not state.api_key:

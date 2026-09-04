@@ -13,7 +13,12 @@ async def reset_state():
 @pytest.mark.asyncio
 async def test_get_state_endpoint():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        response = await ac.get("/api/state")
+        # Without PIN -> 401 Unauthorized
+        unauth = await ac.get("/api/state")
+        assert unauth.status_code == 401
+
+        # With PIN -> 200 OK
+        response = await ac.get("/api/state", headers={"X-Auth-PIN": state.auth_pin})
         assert response.status_code == 200
         data = response.json()
         assert "is_active" in data
@@ -24,7 +29,11 @@ async def test_get_state_endpoint():
 @pytest.mark.asyncio
 async def test_bot_toggle_active():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        response = await ac.post("/api/bot/toggle?active=true")
+        # Without PIN -> 401
+        unauth = await ac.post("/api/bot/toggle?active=true")
+        assert unauth.status_code == 401
+
+        response = await ac.post("/api/bot/toggle?active=true", headers={"X-Auth-PIN": state.auth_pin})
         assert response.status_code == 200
         assert response.json()["is_active"] is True
         assert state.is_active is True
@@ -32,7 +41,7 @@ async def test_bot_toggle_active():
 @pytest.mark.asyncio
 async def test_simulate_trade_signal():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        response = await ac.post("/api/trade/simulate")
+        response = await ac.post("/api/trade/simulate", headers={"X-Auth-PIN": state.auth_pin})
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
@@ -44,11 +53,11 @@ async def test_simulate_trade_signal():
 async def test_trade_approval_flow():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         # Create trade signal
-        await ac.post("/api/trade/simulate")
+        await ac.post("/api/trade/simulate", headers={"X-Auth-PIN": state.auth_pin})
         assert state.pending_trade is not None
 
         # Approve trade
-        response = await ac.post("/api/trade/decide?approved=true")
+        response = await ac.post("/api/trade/decide?approved=true", headers={"X-Auth-PIN": state.auth_pin})
         assert response.status_code == 200
         assert response.json()["status"] == "approved"
         assert state.pending_trade is None
@@ -57,11 +66,11 @@ async def test_trade_approval_flow():
 async def test_trade_rejection_flow():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         # Create trade signal
-        await ac.post("/api/trade/simulate")
+        await ac.post("/api/trade/simulate", headers={"X-Auth-PIN": state.auth_pin})
         assert state.pending_trade is not None
 
         # Reject trade
-        response = await ac.post("/api/trade/decide?approved=false")
+        response = await ac.post("/api/trade/decide?approved=false", headers={"X-Auth-PIN": state.auth_pin})
         assert response.status_code == 200
         assert response.json()["status"] == "rejected"
         assert state.pending_trade is None
@@ -944,7 +953,7 @@ async def test_ai_scout_auto_execution_when_approval_disabled(monkeypatch):
     wd_mod._last_scout_time = 0.0
     wd_mod._scout_cooldowns.clear()
 
-    async def mock_scan(ctx, api_key, model=None):
+    async def mock_scan(ctx, api_key, model=None, **kwargs):
         return {
             "market_regime": "BULLISH_GREED",
             "top_opportunities": [
@@ -1090,8 +1099,9 @@ async def test_api_decide_all_and_by_id_endpoints():
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         state.clear_pending_trades()
+        headers = {"X-Auth-PIN": state.auth_pin}
         # Simulate 2 trades
-        resp = await ac.post("/api/trade/simulate?count=2")
+        resp = await ac.post("/api/trade/simulate?count=2", headers=headers)
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["pending_trades"]) == 2
@@ -1101,13 +1111,13 @@ async def test_api_decide_all_and_by_id_endpoints():
         t2 = data["pending_trades"][1]
 
         # Decide individual trade by trade_id
-        resp1 = await ac.post(f"/api/trade/decide?approved=true&trade_id={t1['id']}")
+        resp1 = await ac.post(f"/api/trade/decide?approved=true&trade_id={t1['id']}", headers=headers)
         assert resp1.status_code == 200
         assert resp1.json()["status"] == "approved"
         assert len(state.pending_trades) == 1
 
         # Decide all remaining trades
-        resp_all = await ac.post("/api/trade/decide_all?approved=false")
+        resp_all = await ac.post("/api/trade/decide_all?approved=false", headers=headers)
         assert resp_all.status_code == 200
         res_data = resp_all.json()
         assert res_data["status"] == "ok"
@@ -1215,6 +1225,497 @@ async def test_discord_multi_trade_embed_and_view():
     resolved_embed = build_multi_trade_embed(trades, resolutions)
     assert resolved_embed is not None
     assert "Batch Trades Resolved" in resolved_embed.title
+
+@pytest.mark.asyncio
+async def test_binance_order_failure_aborts_without_executed_status():
+    from engine.trades import decide_trade
+    from engine.risk_manager import risk_manager
+    from engine.db import get_trade_history
+
+    state.is_active = True
+    state.testnet = False
+    state.usdt_balance = 500.0
+    initial_daily_spent = risk_manager.daily_spent
+
+    class MockFailingBinanceClient:
+        async def create_order(self, **kwargs):
+            raise RuntimeError("Binance API: Insufficient margin balance")
+
+    state.binance_client = MockFailingBinanceClient()
+    state.clear_pending_trades()
+
+    trade_payload = {
+        "id": 9991,
+        "pair": "BTCUSDT",
+        "action": "BUY",
+        "amount_usdt": 50.0,
+        "amount_asset": 50.0 / 65000.0,
+        "price": 65000.0,
+        "reason": "Test Failure Handling"
+    }
+    state.add_pending_trade(trade_payload)
+
+    # Attempt to approve trade
+    result = await decide_trade(approved=True, trade_id=9991)
+
+    assert result["status"] == "error"
+    assert "Binance API: Insufficient margin balance" in result["message"]
+    assert state.usdt_balance == 500.0
+    assert risk_manager.daily_spent == initial_daily_spent
+    assert 9991 not in state.pending_trades
+
+    # Check database: status should be FAILED, NOT EXECUTED
+    history = await get_trade_history(limit=5, is_testnet=False)
+    assert any("FAILED" in t["status"] for t in history if t["pair"] == "BTCUSDT")
+    assert not any(t["status"] == "EXECUTED" and t["amount_usdt"] == 50.0 for t in history)
+
+    state.testnet = True
+    state.binance_client = None
+
+def test_auth_pin_redacted_from_state_to_dict():
+    state.auth_pin = "sensitive_security_pin_9876"
+    dump = state.to_dict()
+    assert "auth_pin" not in dump
+    assert "pin" not in dump
+    assert dump.get("has_pin") is True
+
+@pytest.mark.asyncio
+async def test_rolling_24h_spend_calculation():
+    import time
+    from engine.db import log_trade, get_rolling_daily_spend
+    from engine.risk_manager import risk_manager
+
+    now = time.time()
+    # 1. BUY 2 hours ago (within 24h): $40
+    await log_trade("BTCUSDT", "BUY", 40.0, 60000.0, "EXECUTED", "ORD_RECENT_BUY", is_testnet=True, timestamp=now - 7200)
+    # 2. BUY 26 hours ago (older than 24h): $100 -> must NOT count
+    await log_trade("BTCUSDT", "BUY", 100.0, 60000.0, "EXECUTED", "ORD_OLD_BUY", is_testnet=True, timestamp=now - (26 * 3600))
+    # 3. SELL 1 hour ago (within 24h): $80 -> must NOT count towards spend
+    await log_trade("BTCUSDT", "SELL", 80.0, 65000.0, "EXECUTED", "ORD_RECENT_SELL", is_testnet=True, timestamp=now - 3600)
+    # 4. FAILED BUY 1 hour ago: $50 -> must NOT count
+    await log_trade("BTCUSDT", "BUY", 50.0, 60000.0, "FAILED: Test", "ORD_FAILED_BUY", is_testnet=True, timestamp=now - 3600)
+
+    spend_24h = await get_rolling_daily_spend(is_testnet=True)
+    assert spend_24h >= 40.0
+
+    await risk_manager.refresh_daily_spend(is_testnet=True)
+    assert risk_manager.daily_spent == spend_24h
+
+    # Verify record_spend only increments for BUY
+    prev_spent = risk_manager.daily_spent
+    risk_manager.record_spend(25.0, action="SELL")
+    assert risk_manager.daily_spent == prev_spent
+
+    risk_manager.record_spend(25.0, action="BUY")
+    assert risk_manager.daily_spent == prev_spent + 25.0
+
+@pytest.mark.asyncio
+async def test_discord_rbac_authorization():
+    orig_allowed = list(state.allowed_discord_user_ids)
+    test_uid = "123456789012345678"
+    state.allowed_discord_user_ids = [test_uid]
+
+    try:
+        # Authorized user checks via is_discord_user_authorized
+        assert state.is_discord_user_authorized(test_uid) is True
+        assert state.is_discord_user_authorized(int(test_uid)) is True
+
+        # Unauthorized user checks
+        unauth_id = "999999999999999999"
+        assert state.is_discord_user_authorized(unauth_id) is False
+        assert state.is_discord_user_authorized(int(unauth_id)) is False
+
+        # BatchTradeApprovalView interaction check
+        from engine.notifier import BatchTradeApprovalView, guard_discord_auth, require_discord_auth
+        view = BatchTradeApprovalView(trades=[{"id": 881, "pair": "ETHUSDT", "action": "BUY", "price": 3000.0, "amount_usdt": 10.0}])
+
+        class MockUser:
+            def __init__(self, uid):
+                self.id = uid
+
+        class MockResponse:
+            def __init__(self, parent):
+                self.parent = parent
+            async def send_message(self, text, ephemeral=False):
+                self.parent.sent_messages.append({"text": text, "ephemeral": ephemeral})
+
+        class MockInteraction:
+            def __init__(self, uid):
+                self.user = MockUser(uid)
+                self.sent_messages = []
+                self.response = MockResponse(self)
+
+        # Test unauthorized interaction callback
+        unauth_interaction = MockInteraction(999999999999999999)
+        cb = view._make_single_callback(881, True)
+        await cb(unauth_interaction)
+        assert len(unauth_interaction.sent_messages) == 1
+        assert "Unauthorized" in unauth_interaction.sent_messages[0]["text"]
+        assert "999999999999999999" in unauth_interaction.sent_messages[0]["text"]
+        assert unauth_interaction.sent_messages[0]["ephemeral"] is True
+
+        # Test direct guard_discord_auth function
+        assert await guard_discord_auth(unauth_interaction) is False
+        auth_interaction = MockInteraction(int(test_uid))
+        assert await guard_discord_auth(auth_interaction) is True
+
+        # Test integer in allowed list matches string caller
+        state.allowed_discord_user_ids = [int(test_uid)]
+        assert state.is_discord_user_authorized(test_uid) is True
+    finally:
+        state.allowed_discord_user_ids = orig_allowed
+
+@pytest.mark.asyncio
+async def test_sync_binance_2026_trades_deduplication():
+    import time
+    from engine.trades import sync_binance_2026_trades
+    from engine.db import get_trade_history
+
+    uid = int(time.time() * 1000)
+    oid1, tid1 = uid, uid + 1
+    oid2, tid2 = uid + 2, uid + 3
+    ref1 = f"{oid1}_{tid1}"
+
+    class MockBinanceClient2026:
+        async def get_my_trades(self, symbol, startTime, limit=500):
+            if symbol == "SOLUSDT":
+                return [
+                    {
+                        "id": tid1,
+                        "orderId": oid1,
+                        "isBuyer": True,
+                        "price": "180.0",
+                        "qty": "0.1",
+                        "quoteQty": "18.0",
+                        "time": 1767225600000
+                    },
+                    {
+                        "id": tid2,
+                        "orderId": oid2,
+                        "isBuyer": False,
+                        "price": "195.0",
+                        "qty": "0.1",
+                        "quoteQty": "19.5",
+                        "time": 1767312000000
+                    }
+                ]
+            return []
+
+    mock_client = MockBinanceClient2026()
+
+    # First sync: 2 trades imported
+    res1 = await sync_binance_2026_trades(client=mock_client, pairs=["SOLUSDT"])
+    assert res1["status"] == "ok"
+    assert res1["imported"] == 2
+
+    # Second sync: should be deduplicated (0 new imports)
+    res2 = await sync_binance_2026_trades(client=mock_client, pairs=["SOLUSDT"])
+    assert res2["status"] == "ok"
+    assert res2["imported"] == 0
+
+    history = await get_trade_history(limit=1000, is_testnet=state.testnet)
+    sol_trades = [t for t in history if t["pair"] == "SOLUSDT" and ref1 in str(t.get("order_id", ""))]
+    assert len(sol_trades) == 1
+    assert sol_trades[0]["action"] == "BUY"
+    assert sol_trades[0]["status"] == "EXECUTED"
+
+@pytest.mark.asyncio
+async def test_trade_timeout_watchdog_clock():
+    import time
+    import asyncio
+    from engine.watchdogs import trade_timeout_watchdog
+
+    state.clear_pending_trades()
+    now = time.time()
+    # Expired trade: created 700s ago with 600s timeout
+    state.add_pending_trade({
+        "id": 9995,
+        "pair": "AVAXUSDT",
+        "action": "BUY",
+        "price": 30.0,
+        "amount_usdt": 10.0,
+        "timeout_sec": 600,
+        "created_at": now - 700
+    })
+    # Active trade: created 50s ago with 600s timeout
+    state.add_pending_trade({
+        "id": 9996,
+        "pair": "DOTUSDT",
+        "action": "BUY",
+        "price": 5.0,
+        "amount_usdt": 10.0,
+        "timeout_sec": 600,
+        "created_at": now - 50
+    })
+
+    assert len(state.pending_trades) == 2
+
+    task = asyncio.create_task(trade_timeout_watchdog())
+    await asyncio.sleep(1.2)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert 9995 not in state.pending_trades
+    assert 9996 in state.pending_trades
+    assert state.pending_trades[9996]["timeout_sec"] < 600
+
+def test_setup_env_script(tmp_path):
+    import os
+    import stat
+    from setup_env import parse_args, setup_environment
+
+    test_env = tmp_path / ".env.test"
+    args = parse_args([
+        "--env-path", str(test_env),
+        "--discord-id", "123456789012345678,987654321098765432",
+        "--pin", "4321",
+        "--binance-key", "test_key",
+        "--binance-secret", "test_sec",
+        "--testnet", "true",
+        "--discord-token", "bot_tok_123",
+        "--discord-channel", "ch_123",
+        "--gemini-key", "gem_key_123",
+        "--gemini-model", "gemini-3.1-flash-lite",
+        "--non-interactive"
+    ])
+
+    written_path = setup_environment(args)
+    assert written_path.exists()
+
+    content = written_path.read_text(encoding="utf-8")
+    assert "ALLOWED_DISCORD_USER_IDS=123456789012345678,987654321098765432" in content
+    assert "AUTH_PIN=4321" in content
+    assert "BINANCE_API_KEY=test_key" in content
+    assert "BINANCE_SECRET_KEY=test_sec" in content
+    assert "BINANCE_TESTNET=true" in content
+    assert "DISCORD_BOT_TOKEN=bot_tok_123" in content
+    assert "DISCORD_CHANNEL_ID=ch_123" in content
+    assert "GEMINI_API_KEY=gem_key_123" in content
+
+    # Check 0600 file permissions (read/write only for owner)
+    mode = stat.S_IMODE(os.stat(written_path).st_mode)
+    assert mode == 0o600
+
+def test_api_config_discord_id_persistence():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    pin = state.auth_pin or "1234"
+    orig_allowed = list(state.allowed_discord_user_ids)
+
+    base_payload = {
+        "max_trade_usdt": 50.0,
+        "max_daily_spend_usdt": 200.0,
+        "min_usdt_reserve": 20.0,
+        "require_human_approval": True,
+        "auth_pin": pin,
+        "favorite_pairs": "BTCUSDT,ETHUSDT",
+        "testnet": True,
+        "dca_interval": 3600,
+        "rsi_threshold": 30.0,
+        "tp_percent": 5.0,
+        "sl_percent": 3.0,
+        "trailing_enabled": True,
+        "trailing_activation_percent": 3.0,
+        "trailing_delta_percent": 1.5,
+        "partial_tp_enabled": True,
+        "partial_tp_percent": 4.0,
+        "partial_tp_ratio": 0.5,
+        "bull_regime_dip_enabled": True,
+        "bull_rsi_threshold": 42.0,
+        "rsi_timeframe_minutes": 60,
+        "rsi_history_length": 250,
+        "signal_cooldown_hours": 24.0,
+        "discord_webhook_url": "",
+        "discord_bot_token": "",
+        "discord_channel_id": "",
+        "allowed_discord_user_ids": "",
+        "gemini_api_key": "",
+        "gemini_model": "gemini-3.1-flash-lite",
+        "gemini_search_model": "gemini-3.5-flash",
+        "ai_scout_enabled": True,
+        "ai_scout_interval_hours": 2.0,
+        "ai_scout_min_confidence": 0.85
+    }
+
+    try:
+        # 1. Save comma-separated string
+        p1 = dict(base_payload)
+        p1["allowed_discord_user_ids"] = "111222333444, 555666777888"
+        r1 = client.post("/api/config", json=p1, headers={"X-Auth-PIN": pin})
+        assert r1.status_code == 200
+        assert state.allowed_discord_user_ids == ["111222333444", "555666777888"]
+
+        # 2. Save list of strings
+        p2 = dict(base_payload)
+        p2["allowed_discord_user_ids"] = ["999000111", "222333444"]
+        r2 = client.post("/api/config", json=p2, headers={"X-Auth-PIN": pin})
+        assert r2.status_code == 200
+        assert state.allowed_discord_user_ids == ["999000111", "222333444"]
+
+        # 3. Empty string should NOT overwrite existing saved IDs
+        p3 = dict(base_payload)
+        p3["allowed_discord_user_ids"] = ""
+        r3 = client.post("/api/config", json=p3, headers={"X-Auth-PIN": pin})
+        assert r3.status_code == 200
+        assert state.allowed_discord_user_ids == ["999000111", "222333444"]
+
+        # 4. Explicit CLEAR should reset to empty list
+        p4 = dict(base_payload)
+        p4["allowed_discord_user_ids"] = "CLEAR"
+        r4 = client.post("/api/config", json=p4, headers={"X-Auth-PIN": pin})
+        assert r4.status_code == 200
+        assert state.allowed_discord_user_ids == []
+    finally:
+        state.allowed_discord_user_ids = orig_allowed
+
+def test_web_companion_cache_headers():
+    from fastapi.testclient import TestClient
+    from main import app
+
+    client = TestClient(app)
+    res = client.get("/web")
+    assert res.status_code == 200
+    cache_control = res.headers.get("cache-control", "")
+    assert "no-cache" in cache_control
+    assert "no-store" in cache_control
+
+def test_dump_pydantic_model_compatibility():
+    from engine.api_routes import dump_pydantic_model
+
+    class V2Dummy:
+        def model_dump(self):
+            return {"a": 1, "b": "v2"}
+
+    assert dump_pydantic_model(V2Dummy()) == {"a": 1, "b": "v2"}
+
+    class V1Dummy:
+        def dict(self):
+            return {"a": 2, "b": "v1"}
+
+    assert dump_pydantic_model(V1Dummy()) == {"a": 2, "b": "v1"}
+
+    class PlainDummy:
+        def __init__(self):
+            self.a = 3
+            self.b = "plain"
+
+    assert dump_pydantic_model(PlainDummy()) == {"a": 3, "b": "plain"}
+
+@pytest.mark.asyncio
+async def test_api_config_with_simulated_pydantic_v1():
+    from engine.api_routes import update_config
+    from engine.state import state
+
+    orig_allowed = list(state.allowed_discord_user_ids)
+    try:
+        class MockV1Config:
+            def __init__(self):
+                self.max_trade_usdt = 25.0
+                self.max_daily_spend_usdt = 100.0
+                self.min_usdt_reserve = 20.0
+                self.require_human_approval = False
+                self.auth_pin = state.auth_pin or "1234"
+                self.api_key = ""
+                self.secret_key = ""
+                self.favorite_pairs = "BTCUSDT"
+                self.testnet = True
+                self.dca_interval = 3600
+                self.rsi_threshold = 30.0
+                self.tp_percent = 5.0
+                self.sl_percent = 3.0
+                self.trailing_enabled = True
+                self.trailing_activation_percent = 3.0
+                self.trailing_delta_percent = 1.5
+                self.partial_tp_enabled = True
+                self.partial_tp_percent = 4.0
+                self.partial_tp_ratio = 0.5
+                self.bull_regime_dip_enabled = True
+                self.bull_rsi_threshold = 42.0
+                self.rsi_timeframe_minutes = 60
+                self.rsi_history_length = 250
+                self.signal_cooldown_hours = 24.0
+                self.discord_webhook_url = ""
+                self.discord_bot_token = ""
+                self.discord_channel_id = ""
+                self.allowed_discord_user_ids = "888777666"
+                self.gemini_api_key = ""
+                self.gemini_model = "gemini-3.1-flash-lite"
+                self.gemini_search_model = "gemini-3.5-flash"
+                self.ai_scout_enabled = True
+                self.ai_scout_interval_hours = 2.0
+                self.ai_scout_min_confidence = 0.85
+
+            def dict(self):
+                return {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
+
+        mock_cfg = MockV1Config()
+        assert not hasattr(mock_cfg, "model_dump")
+        res = await update_config(mock_cfg)
+        assert res["status"] == "ok"
+        assert "888777666" in state.allowed_discord_user_ids
+    finally:
+        state.allowed_discord_user_ids = orig_allowed
+
+@pytest.mark.asyncio
+async def test_trade_history_chronological_sorting():
+    from engine.db import log_trade, get_trade_history
+    import time
+
+    uid = int(time.time() * 1000)
+    o1, o2, o3 = f"ORD_SORT_1_{uid}", f"ORD_SORT_2_{uid}", f"ORD_SORT_3_{uid}"
+    base_time = time.time()
+    await log_trade("BTCUSDT", "BUY", 100.0, 60000.0, "EXECUTED", o1, is_testnet=True, timestamp=base_time - 100)
+    await log_trade("SOLUSDT", "BUY", 50.0, 150.0, "EXECUTED", o2, is_testnet=True, timestamp=base_time - 1000)
+    await log_trade("ETHUSDT", "BUY", 75.0, 3000.0, "EXECUTED", o3, is_testnet=True, timestamp=base_time)
+
+    history = await get_trade_history(limit=1000, is_testnet=True)
+    sort_orders = [t["order_id"] for t in history if t["order_id"] in (o1, o2, o3)]
+    assert sort_orders == [o3, o1, o2]
+
+@pytest.mark.asyncio
+async def test_order_exists_and_deduplicate_trade_history():
+    from engine.db import log_trade, order_exists, deduplicate_trade_history, get_trade_history
+    import time
+
+    uid = int(time.time() * 1000)
+    oid = f"TEST_DEDUP_{uid}"
+    tid1 = f"{oid}_1"
+
+    await log_trade("BTCUSDT", "BUY", 20.0, 60000.0, "EXECUTED", oid, is_testnet=True)
+    assert await order_exists(oid, is_testnet=True) is True
+    assert await order_exists(tid1, is_testnet=True) is True
+
+    await log_trade("BTCUSDT", "BUY", 20.0, 60000.0, "EXECUTED", tid1, is_testnet=True)
+    await log_trade("BTCUSDT", "BUY", 20.0, 60000.0, "EXECUTED", tid1, is_testnet=True)
+
+    pruned = await deduplicate_trade_history(is_testnet=True)
+    assert pruned >= 2
+
+    history = await get_trade_history(limit=50, is_testnet=True)
+    matching = [t for t in history if oid in str(t.get("order_id", ""))]
+    assert len(matching) == 1
+    assert matching[0]["order_id"] == tid1
+
+def test_api_deduplicate_trades():
+    from fastapi.testclient import TestClient
+    from main import app
+    from engine.state import state
+
+    client = TestClient(app)
+    pin = state.auth_pin or "1234"
+    res = client.post("/api/trades/deduplicate", headers={"X-Auth-PIN": pin})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "ok"
+    assert "pruned_duplicates" in data
+
+
+
 
 
 

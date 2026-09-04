@@ -21,7 +21,7 @@ build/
 *.env
 *.env.*
 !*.env.example
-client_pin.txt
+*.sh
 
 # Databases & Runtime Logs
 *.db

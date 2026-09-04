@@ -47,6 +47,23 @@ async def lifespan(app: FastAPI):
         state.discord_webhook_url = saved_cfg.get("discord_webhook_url", "")
         state.discord_bot_token = saved_cfg.get("discord_bot_token", os.getenv("DISCORD_BOT_TOKEN", ""))
         state.discord_channel_id = saved_cfg.get("discord_channel_id", os.getenv("DISCORD_CHANNEL_ID", ""))
+        
+        raw_discord_ids = saved_cfg.get("allowed_discord_user_ids")
+        if not raw_discord_ids:
+            raw_discord_ids = os.getenv("ALLOWED_DISCORD_USER_IDS") or os.getenv("DISCORD_USER_ID", "")
+
+        if isinstance(raw_discord_ids, list):
+            state.allowed_discord_user_ids = [str(x).strip() for x in raw_discord_ids if str(x).strip()]
+        elif isinstance(raw_discord_ids, str) and raw_discord_ids.strip():
+            state.allowed_discord_user_ids = [x.strip() for x in raw_discord_ids.split(",") if x.strip()]
+        else:
+            state.allowed_discord_user_ids = []
+
+        if state.allowed_discord_user_ids:
+            logger.info(f"Loaded {len(state.allowed_discord_user_ids)} authorized Discord operator ID(s).")
+        else:
+            logger.warning("No authorized Discord user IDs configured. Discord bot commands will be locked until an ID is set in .env or Web Companion.")
+
         state.gemini_api_key = saved_cfg.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))
         state.gemini_model = saved_cfg.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"))
         state.gemini_search_model = saved_cfg.get("gemini_search_model", os.getenv("GEMINI_SEARCH_MODEL", "gemini-3.5-flash"))
@@ -61,10 +78,24 @@ async def lifespan(app: FastAPI):
                 cipher = get_cipher(state.auth_pin)
                 state.api_key = cipher.decrypt(enc_api.encode()).decode()
                 state.secret_key = cipher.decrypt(enc_sec.encode()).decode()
-            except Exception as e:
-                logger.error("Failed to decrypt API keys (Invalid PIN?)")
+            except Exception:
+                try:
+                    from engine.state import get_legacy_cipher
+                    legacy = get_legacy_cipher(state.auth_pin)
+                    state.api_key = legacy.decrypt(enc_api.encode()).decode()
+                    state.secret_key = legacy.decrypt(enc_sec.encode()).decode()
+                    # Re-encrypt with modern PBKDF2HMAC
+                    saved_cfg["api_key"] = cipher.encrypt(state.api_key.encode()).decode()
+                    saved_cfg["secret_key"] = cipher.encrypt(state.secret_key.encode()).decode()
+                    from engine.db import save_config_item
+                    await save_config_item("risk_config", saved_cfg)
+                    logger.info("Migrated API keys to PBKDF2HMAC encryption.")
+                except Exception:
+                    logger.error("Failed to decrypt API keys (Invalid PIN?)")
         
         logger.info(f"Loaded config from DB.")
+
+    await risk_manager.refresh_daily_spend(state.testnet)
         
     state_data = await load_config_item("strategy_state")
     if state_data:
@@ -105,7 +136,7 @@ app = FastAPI(title="Cripto-3DS Bot Engine", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|100\.\d+\.\d+\.\d+|moto-e20)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

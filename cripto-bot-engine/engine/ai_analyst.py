@@ -448,7 +448,7 @@ async def ask_gemini(
     active portfolio positions, cost bases, unrealized PnL, and macro sentiment.
     """
     if not api_key:
-        return "⚠️ Google AI Studio API key not configured. Add your free key in Web Companion Settings to enable AI features."
+        return "[WARNING] Google AI Studio API key not configured. Add your free key in Web Companion Settings to enable AI features."
 
     fng = await fetch_fear_and_greed_index()
     fng_str = f"{fng.get('value', 50)}/100 ({fng.get('classification', 'Neutral')})"
@@ -504,7 +504,7 @@ Please answer the user's question clearly, incorporating live technicals, open p
 """
     system_inst = "You are Cripto-3DS AI Assistant, an expert quantitative cryptocurrency analyst and algorithmic trading assistant."
     result = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, use_google_search=False)
-    return result or "⚠️ Gemini AI was unable to generate a response. Please try again."
+    return result or "[WARNING] Gemini AI was unable to generate a response. Please try again."
 
 
 async def generate_market_briefing(
@@ -521,7 +521,7 @@ async def generate_market_briefing(
         return {
             "headline": "Crypto Market Morning Intelligence",
             "fng_str": "N/A",
-            "macro_regime": "⚠️ Google AI Studio API key not configured. Add your key in Web Companion Settings to enable AI briefings.",
+            "macro_regime": "[WARNING] Google AI Studio API key not configured. Add your key in Web Companion Settings to enable AI briefings.",
             "key_levels": "N/A",
             "strategy_recommendation": "Configure Gemini API key to activate daily quantitative market analysis.",
             "pnl_summary": pnl_summary or {}
@@ -613,7 +613,7 @@ async def scan_market_opportunities(
             "market_regime": "NEUTRAL",
             "fng_str": "N/A",
             "top_opportunities": [],
-            "tactical_summary": "⚠️ Add Gemini API key to activate real-time AI opportunity scanner."
+            "tactical_summary": "[NOTE] Add Gemini API key to activate real-time AI opportunity scanner."
         }
 
     fng = await fetch_fear_and_greed_index()

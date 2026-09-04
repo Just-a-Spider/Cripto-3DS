@@ -1,19 +1,27 @@
 import asyncio
 import datetime
+import time
 from engine.logger import logger
 from engine.state import state
 from engine.ws_manager import broadcast_state
-from engine.db import log_trade
+from engine.db import log_trade, load_config_item
 from engine.trades import refresh_cost_bases
+from engine.ai_analyst import scan_market_opportunities
+from engine.risk_manager import risk_manager
 
 async def trade_timeout_watchdog():
     while True:
         await asyncio.sleep(1)
         if state.pending_trades:
+            now = time.time()
             expired_ids = []
             for tid, trade in list(state.pending_trades.items()):
-                trade["timeout_sec"] -= 1
-                if trade["timeout_sec"] <= 0:
+                created_at = float(trade.get("created_at", now))
+                timeout_total = float(trade.get("timeout_sec_total", trade.get("timeout_sec", 600)))
+                trade["timeout_sec_total"] = timeout_total
+                remaining = int(timeout_total - (now - created_at))
+                trade["timeout_sec"] = max(0, remaining)
+                if remaining <= 0:
                     expired_ids.append((tid, trade))
 
             if expired_ids:
@@ -28,13 +36,9 @@ async def trade_timeout_watchdog():
 
 async def cost_basis_watchdog():
     while True:
+        # Periodic background refresh throttled to 30m to protect Binance rate limits
+        await asyncio.sleep(1800)
         await refresh_cost_bases()
-        await asyncio.sleep(60)
-
-import time
-from engine.ai_analyst import scan_market_opportunities
-from engine.risk_manager import risk_manager
-from engine.db import load_config_item
 
 _last_scout_time = 0.0
 _scout_cooldowns = {}
@@ -95,16 +99,12 @@ async def ai_opportunity_scout_watchdog():
                     now = time.time()
                     hour = datetime.datetime.fromtimestamp(now, datetime.timezone.utc).hour
                     if 0 <= hour < 6:
-                        _time_factor = 0.95   # Asian session — quieter, lower threshold
+                        _time_factor = 0.95   # Asian session — quieter
                     elif 6 <= hour < 18:
-                        _time_factor = 1.0    # Mixed sessions — standard threshold
+                        _time_factor = 1.0    # Mixed sessions — standard
                     else:
-                        _time_factor = 0.9    # US session — higher volatility, lower threshold
+                        _time_factor = 0.95   # US session
                     min_conf = _min_conf_base * _time_factor
-
-                    # Confidence decay for stale analyses
-                    _age_factor = max(0.0, 1.0 - (now - _last_scout_time) / (interval_hours * 3600.0 + 60))
-                    adjusted_min_conf = min_conf * _age_factor
 
                     evaluated_count = len(opps)
                     staged_trades = []
@@ -116,8 +116,8 @@ async def ai_opportunity_scout_watchdog():
                         conf = float(opp.get("confidence", 0.0))
                         analysis = opp.get("analysis", "")
 
-                        if not pair or conf < adjusted_min_conf:
-                            logger.info(f"AI Scout: Skipping {pair} ({int(conf*100)}% Conf) - Below {int(adjusted_min_conf*100)}% threshold (age factor: {_age_factor:.2f}).")
+                        if not pair or conf < min_conf:
+                            logger.info(f"AI Scout: Skipping {pair} ({int(conf*100)}% Conf) - Below {int(min_conf*100)}% threshold.")
                             continue
 
                         if pair in pending_pairs:

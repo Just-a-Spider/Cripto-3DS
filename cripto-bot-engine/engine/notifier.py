@@ -7,6 +7,8 @@ from typing import Optional, Dict, Any
 
 logger = logging.getLogger("CriptoBotEngine")
 
+import functools
+
 # Optional Discord.py imports
 try:
     import discord
@@ -17,6 +19,40 @@ except ImportError:
     HAS_DISCORD_PY = False
     app_commands = None
     logger.warning("discord.py not installed. Interactive Discord buttons disabled.")
+
+async def guard_discord_auth(interaction: Any) -> bool:
+    from engine.state import state
+    user = getattr(interaction, "user", None)
+    uid = getattr(user, "id", None)
+    if not state.is_discord_user_authorized(uid):
+        logger.warning(
+            f"Blocked unauthorized Discord command from user {user} (ID: {uid}). "
+            f"Allowed IDs: {state.allowed_discord_user_ids}"
+        )
+        msg = f"Unauthorized. Your user ID ({uid}) is not authorized for engine commands."
+        resp = getattr(interaction, "response", None)
+        is_done = False
+        if resp and hasattr(resp, "is_done") and callable(resp.is_done):
+            try:
+                is_done = resp.is_done()
+            except Exception:
+                is_done = False
+
+        if resp and hasattr(resp, "send_message") and not is_done:
+            await resp.send_message(msg, ephemeral=True)
+        elif hasattr(interaction, "followup") and hasattr(interaction.followup, "send"):
+            await interaction.followup.send(msg, ephemeral=True)
+        return False
+    return True
+
+def require_discord_auth(func):
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        interaction = next((a for a in args if hasattr(a, "response") and hasattr(a, "user")), None) or kwargs.get("interaction")
+        if interaction and not await guard_discord_auth(interaction):
+            return
+        return await func(*args, **kwargs)
+    return wrapper
 
 def build_briefing_embed(data: dict, model_name: str) -> Optional[Any]:
     if not HAS_DISCORD_PY:
@@ -29,20 +65,20 @@ def build_briefing_embed(data: dict, model_name: str) -> Optional[Any]:
     pnl = data.get("pnl_summary", {})
 
     embed = discord.Embed(
-        title=f"🌅 {headline}",
+        title=f"[BRIEFING] {headline}",
         color=0xbd93f9,
         description="**Automated Daily Market Intelligence & Strategy Briefing**"
     )
-    embed.add_field(name="🧭 Sentiment & Macro", value=f"**Fear & Greed Index:** `{fng_str}`\n{macro}", inline=False)
-    embed.add_field(name="🎯 Key Watchlist Levels", value=levels, inline=False)
-    embed.add_field(name="💡 Tactical Strategy", value=strategy, inline=False)
+    embed.add_field(name="Sentiment & Macro", value=f"**Fear & Greed Index:** `{fng_str}`\n{macro}", inline=False)
+    embed.add_field(name="Key Watchlist Levels", value=levels, inline=False)
+    embed.add_field(name="Tactical Strategy", value=strategy, inline=False)
 
     if pnl and pnl.get("closed_trades", 0) > 0:
         pnl_val = pnl.get("total_pnl_usdt", 0.0)
         win_rate = pnl.get("win_rate", 0.0)
         closed = pnl.get("closed_trades", 0)
         pnl_str = f"**Realized PnL:** `${pnl_val:+.2f} USDT` • **Win Rate:** `{win_rate}%` ({closed} trades)"
-        embed.add_field(name="💰 Bot Performance", value=pnl_str, inline=False)
+        embed.add_field(name="Bot Performance", value=pnl_str, inline=False)
 
     embed.set_footer(text=f"Model: {model_name} • Google AI Studio • Cripto-3DS Engine")
     return embed
@@ -59,16 +95,16 @@ def build_multi_trade_embed(trades: list, resolutions: dict = None) -> Optional[
     if pending_count == 0:
         if approved_count > 0 and rejected_count == 0:
             color = 0x50fa7b # All Approved (Green)
-            title = f"✅ All Trades Processed ({approved_count}/{total} Approved)"
+            title = f"All Trades Processed ({approved_count}/{total} Approved)"
         elif rejected_count > 0 and approved_count == 0:
             color = 0xff5555 # All Rejected (Red)
-            title = f"❌ All Trades Rejected ({rejected_count}/{total} Rejected)"
+            title = f"All Trades Rejected ({rejected_count}/{total} Rejected)"
         else:
             color = 0x8be9fd # Mixed (Cyan)
-            title = f"📊 Batch Trades Resolved ({approved_count} Approved, {rejected_count} Rejected)"
+            title = f"Batch Trades Resolved ({approved_count} Approved, {rejected_count} Rejected)"
     else:
         color = 0xbd93f9 # Active Purple
-        title = f"🚨 Trade Confirmations Required ({pending_count}/{total} Pending)"
+        title = f"Trade Confirmations Required ({pending_count}/{total} Pending)"
 
     embed = discord.Embed(
         title=title,
@@ -104,7 +140,7 @@ def build_multi_trade_embed(trades: list, resolutions: dict = None) -> Optional[
 
         table_lines.append(f"{pair:<10} {act:<5} {price_str:<11} {size_str:<8} {risk_str:<8} {status_str:<10}")
     table_lines.append("```")
-    embed.add_field(name="📋 Signals Overview Table", value="\n".join(table_lines), inline=False)
+    embed.add_field(name="Signals Overview Table", value="\n".join(table_lines), inline=False)
 
     # Detailed breakdown per asset
     for t in trades:
@@ -118,32 +154,32 @@ def build_multi_trade_embed(trades: list, resolutions: dict = None) -> Optional[
         created_at = t.get("created_at", time.time())
         exp_ts = int(created_at + timeout_sec)
 
-        v_emoji = "🟢" if act == "BUY" else "🔴"
+        v_tag = "[BUY]" if act == "BUY" else "[SELL]"
         ai_verdict = t.get("ai_verdict", "")
         ai_risk = t.get("ai_risk", "")
         ai_summary = t.get("ai_summary", "") or t.get("analysis", "")
         ai_sl = t.get("ai_sl", "")
 
-        field_name = f"{v_emoji} {act} {pair} • ${price:,.4f} (${amount_usdt:.2f} USDT)"
+        field_name = f"{v_tag} {act} {pair} • ${price:,.4f} (${amount_usdt:.2f} USDT)"
         
         lines = []
         if tid in resolutions:
             res = resolutions[tid]
             if res.get("status") == "approved":
                 oid = f" (Order: `{res.get('order_id')}`)" if res.get("order_id") else ""
-                lines.append(f"**Status:** ✅ **APPROVED**{oid}")
+                lines.append(f"**Status:** [APPROVED]{oid}")
             else:
                 r_text = f" ({res.get('reason')})" if res.get('reason') else ""
-                lines.append(f"**Status:** ❌ **REJECTED**{r_text}")
+                lines.append(f"**Status:** [REJECTED]{r_text}")
         else:
-            lines.append(f"**Status:** ⏳ **PENDING** • **Expires:** <t:{exp_ts}:R>")
+            lines.append(f"**Status:** [PENDING] • **Expires:** <t:{exp_ts}:R>")
 
         lines.append(f"**Reason:** {reason}")
         if ai_verdict:
             sl_info = f" • **Suggested SL:** `-{ai_sl}%`" if ai_sl else ""
-            lines.append(f"🤖 **AI Analysis:** `{ai_verdict}` • **Risk:** `{ai_risk}`{sl_info}")
+            lines.append(f"**AI Analysis:** `{ai_verdict}` • **Risk:** `{ai_risk}`{sl_info}")
             if ai_summary:
-                lines.append(f"💡 *{ai_summary[:180]}*")
+                lines.append(f"*{ai_summary[:180]}*")
 
         embed.add_field(name=field_name, value="\n".join(lines), inline=False)
 
@@ -170,7 +206,6 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
         btn_approve_all = discord.ui.Button(
             label=f"Approve All ({len(unresolved)})",
             style=discord.ButtonStyle.success,
-            emoji="✅",
             row=0,
             custom_id="batch_approve_all"
         )
@@ -180,7 +215,6 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
         btn_reject_all = discord.ui.Button(
             label=f"Reject All ({len(unresolved)})",
             style=discord.ButtonStyle.danger,
-            emoji="❌",
             row=0,
             custom_id="batch_reject_all"
         )
@@ -198,7 +232,6 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
                 btn_app = discord.ui.Button(
                     label=f"Approve {pair}",
                     style=discord.ButtonStyle.success,
-                    emoji="✔",
                     row=row_idx,
                     custom_id=f"app_{tid}"
                 )
@@ -208,7 +241,6 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
                 btn_rej = discord.ui.Button(
                     label=f"Reject {pair}",
                     style=discord.ButtonStyle.secondary,
-                    emoji="✖",
                     row=row_idx,
                     custom_id=f"rej_{tid}"
                 )
@@ -221,13 +253,12 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
                 discord.SelectOption(
                     label=f"Approve {t.get('pair')}",
                     value=str(t.get('id')),
-                    description=f"{t.get('action')} @ ${t.get('price', 0):,.2f} (${t.get('amount_usdt', 0):.0f} USDT)",
-                    emoji="✅"
+                    description=f"{t.get('action')} @ ${t.get('price', 0):,.2f} (${t.get('amount_usdt', 0):.0f} USDT)"
                 ) for t in unresolved[:25]
             ]
             if app_options:
                 select_app = discord.ui.Select(
-                    placeholder="✅ Select asset(s) to APPROVE...",
+                    placeholder="Select asset(s) to APPROVE...",
                     min_values=1,
                     max_values=len(app_options),
                     options=app_options,
@@ -241,13 +272,12 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
                 discord.SelectOption(
                     label=f"Reject {t.get('pair')}",
                     value=str(t.get('id')),
-                    description=f"{t.get('action')} @ ${t.get('price', 0):,.2f}",
-                    emoji="❌"
+                    description=f"{t.get('action')} @ ${t.get('price', 0):,.2f}"
                 ) for t in unresolved[:25]
             ]
             if rej_options:
                 select_rej = discord.ui.Select(
-                    placeholder="❌ Select asset(s) to REJECT...",
+                    placeholder="Select asset(s) to REJECT...",
                     min_values=1,
                     max_values=len(rej_options),
                     options=rej_options,
@@ -258,6 +288,7 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
                 self.add_item(select_rej)
 
     def _make_single_callback(self, trade_id: int, approved: bool):
+        @require_discord_auth
         async def cb(interaction: discord.Interaction):
             from engine.trades import decide_trade
             await interaction.response.defer()
@@ -268,6 +299,7 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
             await interaction.message.edit(embed=embed, view=self)
         return cb
 
+    @require_discord_auth
     async def approve_all_callback(self, interaction: discord.Interaction):
         from engine.trades import decide_trade
         await interaction.response.defer()
@@ -280,6 +312,7 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
         embed = build_multi_trade_embed(self.trades, self.resolutions)
         await interaction.message.edit(embed=embed, view=self)
 
+    @require_discord_auth
     async def reject_all_callback(self, interaction: discord.Interaction):
         from engine.trades import decide_trade
         await interaction.response.defer()
@@ -292,6 +325,7 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
         embed = build_multi_trade_embed(self.trades, self.resolutions)
         await interaction.message.edit(embed=embed, view=self)
 
+    @require_discord_auth
     async def select_approve_callback(self, interaction: discord.Interaction):
         from engine.trades import decide_trade
         await interaction.response.defer()
@@ -307,6 +341,7 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
         embed = build_multi_trade_embed(self.trades, self.resolutions)
         await interaction.message.edit(embed=embed, view=self)
 
+    @require_discord_auth
     async def select_reject_callback(self, interaction: discord.Interaction):
         from engine.trades import decide_trade
         await interaction.response.defer()
@@ -328,7 +363,7 @@ class BatchTradeApprovalView(discord.ui.View if HAS_DISCORD_PY else object):
         if self.message:
             try:
                 embed = build_multi_trade_embed(self.trades, self.resolutions)
-                await self.message.edit(content="⏰ **Trade approval request expired.**", embed=embed, view=self)
+                await self.message.edit(content="[EXPIRED] **Trade approval request expired.**", embed=embed, view=self)
             except Exception:
                 pass
 
@@ -399,11 +434,11 @@ class DiscordBotService:
             from engine.state import state
             from engine.strategies import calculate_bollinger_bands
             embed = discord.Embed(
-                title="📊 Cripto-3DS Engine Status",
+                title="Cripto-3DS Engine Status",
                 color=0x50fa7b if state.is_active else 0xff5555
             )
-            status_str = "ACTIVE 🟢" if state.is_active else "PAUSED ⏸"
-            mode_str = "TESTNET 🧪" if state.testnet else "REAL 💰"
+            status_str = "ACTIVE" if state.is_active else "PAUSED"
+            mode_str = "TESTNET" if state.testnet else "REAL"
             embed.add_field(name="Engine State", value=status_str, inline=True)
             embed.add_field(name="Mode", value=mode_str, inline=True)
             embed.add_field(name="USDT Available", value=f"${state.usdt_balance:.2f}", inline=True)
@@ -435,7 +470,7 @@ class DiscordBotService:
                     holdings_lines.append(f"**{asset}**: `{qty:.6f}` (~`${val:.2f}`)")
 
             embed = discord.Embed(
-                title="💼 Portfolio Balance",
+                title="Portfolio Balance",
                 color=0x8be9fd
             )
             embed.add_field(name="Total Net Worth", value=f"**${total_val:,.2f}**", inline=False)
@@ -443,33 +478,33 @@ class DiscordBotService:
             await interaction.response.send_message(embed=embed)
 
         @self.tree.command(name="start", description="Start/Activate automated trading engine")
+        @require_discord_auth
         async def cmd_start(interaction: discord.Interaction):
-            from engine.state import state
             from engine.ws_manager import broadcast_state
             state.is_active = True
             await broadcast_state()
-            await interaction.response.send_message("✅ Trading Engine **ACTIVATED**.")
+            await interaction.response.send_message("Trading Engine ACTIVATED.")
 
         @self.tree.command(name="pause", description="Pause automated trading engine")
+        @require_discord_auth
         async def cmd_pause(interaction: discord.Interaction):
-            from engine.state import state
             from engine.ws_manager import broadcast_state
             state.is_active = False
             await broadcast_state()
-            await interaction.response.send_message("⏸ Trading Engine **PAUSED**.")
+            await interaction.response.send_message("Trading Engine PAUSED.")
 
         @self.tree.command(name="check", description="Force immediate market evaluation")
+        @require_discord_auth
         async def cmd_check(interaction: discord.Interaction):
-            from engine.state import state
             state.rsi_strategy.cooldowns.clear()
             state.dca_strategy.cooldowns.clear()
             state.tpsl_strategy.cooldowns.clear()
-            await interaction.response.send_message("🔄 Cooldown timers cleared. Evaluating market now.")
+            await interaction.response.send_message("Cooldown timers cleared. Evaluating market now.")
 
         @self.tree.command(name="testbuy", description="Simulate a test trade approval card (single or multi-asset)")
         @app_commands.describe(count="Number of simulated asset signals to test (1 to 4)")
+        @require_discord_auth
         async def cmd_testbuy(interaction: discord.Interaction, count: int = 1):
-            from engine.state import state
             from engine.risk_manager import risk_manager
             from engine.ws_manager import broadcast_state
             await interaction.response.defer()
@@ -497,7 +532,7 @@ class DiscordBotService:
 
             await broadcast_state()
             await self.send_interactive_trades(staged)
-            await interaction.followup.send(f"🚨 Dispatched {len(staged)} test trade signal(s) in table below.")
+            await interaction.followup.send(f"Dispatched {len(staged)} test trade signal(s) in table below.")
 
         @self.tree.command(name="chart", description="Generate a dark-theme candlestick chart with RSI and Bollinger Bands")
         @app_commands.describe(pair="Trading pair symbol (e.g. BTC, ETH, XRPUSDT)", interval="Candlestick interval (15m, 1h, 2h, 4h, 6h, 8h, 12h, 1d)")
@@ -525,12 +560,12 @@ class DiscordBotService:
 
             klines = await fetch_klines(clean_pair, interval=interval_str, limit=30)
             if not klines or len(klines) < 5:
-                await interaction.followup.send(f"❌ Could not fetch candlestick data for `{clean_pair}` (interval: `{interval_str}`).")
+                await interaction.followup.send(f"[ERROR] Could not fetch candlestick data for `{clean_pair}` (interval: `{interval_str}`).")
                 return
             buf = await generate_candlestick_chart(clean_pair, klines, interval=interval_str)
             file = discord.File(fp=buf, filename=f"{clean_pair}_{interval_str}.png")
             embed = discord.Embed(
-                title=f"📈 {clean_pair} • {interval_str.upper()} Candlestick Chart",
+                title=f"{clean_pair} • {interval_str.upper()} Candlestick Chart",
                 color=0x8be9fd
             )
             embed.set_image(url=f"attachment://{clean_pair}_{interval_str}.png")
@@ -550,7 +585,7 @@ class DiscordBotService:
                 model=state.gemini_model
             )
             embed = discord.Embed(
-                title="🤖 Gemini AI Market Analyst",
+                title="Gemini AI Market Analyst",
                 description=answer[:4000],
                 color=0xbd93f9
             )
@@ -582,7 +617,7 @@ class DiscordBotService:
             
             color = 0x50fa7b if data.get("overall_catalyst") == "BULLISH" else (0xff5555 if data.get("overall_catalyst") == "BEARISH" else 0xf1fa8c)
             embed = discord.Embed(
-                title=f"📰 Market News Pulse • Sentiment: {data.get('overall_catalyst', 'NEUTRAL')}",
+                title=f"Market News Pulse • Sentiment: {data.get('overall_catalyst', 'NEUTRAL')}",
                 color=color
             )
             for i, bullet in enumerate(data.get("bullets", []), 1):
@@ -609,8 +644,8 @@ class DiscordBotService:
             regime = data.get("market_regime", "NEUTRAL")
             color = 0x50fa7b if "BULL" in regime else (0xff5555 if "BEAR" in regime else 0x8be9fd)
             embed = discord.Embed(
-                title=f"🎯 Live Market Opportunities • Regime: {regime}",
-                description=f"**Fear & Greed Index:** `{data.get('fng_str', 'N/A')}`\n💡 **Tactical Summary:** {data.get('tactical_summary', '')}",
+                title=f"Live Market Opportunities • Regime: {regime}",
+                description=f"**Fear & Greed Index:** `{data.get('fng_str', 'N/A')}`\n**Tactical Summary:** {data.get('tactical_summary', '')}",
                 color=color
             )
             opps = data.get("top_opportunities", [])
@@ -619,17 +654,14 @@ class DiscordBotService:
                     stype = o.get("setup_type", "SETUP").upper()
                     if "PROFIT" in stype or "EXIT" in stype:
                         action_tag = "SELL (Take Profit)"
-                        emoji = "🟡"
                     elif "DIP" in stype:
                         action_tag = "BUY (Dip Buy)"
-                        emoji = "🟢"
                     else:
                         action_tag = "BUY (Breakout)"
-                        emoji = "🟣"
 
                     conf = int(float(o.get("confidence", 0.8)) * 100)
                     embed.add_field(
-                        name=f"{emoji} {o.get('pair', '')} • **{action_tag}** ({conf}% Confidence)",
+                        name=f"[{action_tag}] {o.get('pair', '')} ({conf}% Confidence)",
                         value=f"**Levels:** `{o.get('key_levels', 'N/A')}`\n{o.get('analysis', '')}",
                         inline=False
                     )
@@ -640,12 +672,13 @@ class DiscordBotService:
             await interaction.followup.send(embed=embed)
 
         @self.tree.command(name="test", description="Run full unit & integration test suite on server")
+        @require_discord_auth
         async def cmd_test(interaction: discord.Interaction):
-            import asyncio, time
+            import asyncio, time, sys
             await interaction.response.defer()
             start = time.time()
             proc = await asyncio.create_subprocess_exec(
-                ".venv/bin/python3", "-m", "pytest", "tests/test_engine.py", "-k", "not test_api_run_test_suite", "-v",
+                sys.executable, "-m", "pytest", "tests/test_engine.py", "-k", "not test_api_run_test_suite", "-v",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -656,7 +689,7 @@ class DiscordBotService:
             
             color = 0x50fa7b if proc.returncode == 0 else 0xff5555
             embed = discord.Embed(
-                title=f"🧪 Test Suite Results: {'PASSED' if proc.returncode == 0 else 'FAILED'}",
+                title=f"Test Suite Results: {'PASSED' if proc.returncode == 0 else 'FAILED'}",
                 description=f"Executed **{passed}** tests in **{duration}s** with exit code **{proc.returncode}**.",
                 color=color
             )
@@ -666,15 +699,24 @@ class DiscordBotService:
 
         @self.tree.command(name="cleartrades", description="Purge unwanted trade records from database")
         @app_commands.describe(all_trades="Set true to wipe entire ledger, false to only clean rejected/test trades")
+        @require_discord_auth
         async def cmd_cleartrades(interaction: discord.Interaction, all_trades: bool = False):
             from engine.db import clear_trade_history
-            from engine.state import state
             from engine.ws_manager import broadcast_state
             await interaction.response.defer()
             deleted = await clear_trade_history(only_unexecuted=not all_trades, is_testnet=state.testnet)
             await broadcast_state()
             mode_str = "All Trades" if all_trades else "Rejected & Test Trades"
-            await interaction.followup.send(f"🗑️ Cleaned **{deleted}** {mode_str} from database.")
+            await interaction.followup.send(f"Cleaned **{deleted}** {mode_str} from database.")
+
+        @self.tree.command(name="sync2026", description="Backfill all Binance trade fills from 2026 to present into database")
+        @require_discord_auth
+        async def cmd_sync2026(interaction: discord.Interaction):
+            await interaction.response.defer()
+            from engine.trades import sync_binance_2026_trades
+            res = await sync_binance_2026_trades()
+            imported = res.get("imported", 0)
+            await interaction.followup.send(f"2026 Binance Sync complete. Imported {imported} trade records into database.")
 
         @self.client.event
         async def on_ready():
@@ -760,7 +802,7 @@ class DiscordBotService:
                     model=state.gemini_model
                 )
                 embed = build_briefing_embed(data, state.gemini_model)
-                await ch.send(content="☀️ **Good Morning! Here is your Daily Cripto-3DS Market Briefing:**", embed=embed)
+                await ch.send(content="**Good Morning! Here is your Daily Cripto-3DS Market Briefing:**", embed=embed)
                 logger.info("Daily morning briefing posted to Discord channel.")
         except Exception as e:
             logger.error(f"Failed to post daily morning briefing: {e}")

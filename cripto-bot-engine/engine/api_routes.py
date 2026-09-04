@@ -1,7 +1,9 @@
 import asyncio
 import time
 import json
+import secrets
 import aiohttp
+from typing import Any, Dict, Optional, Union
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from engine.logger import logger, recent_logs
@@ -15,11 +17,19 @@ from engine.binance_client import restart_binance_websocket
 
 router = APIRouter()
 
+def dump_pydantic_model(model: Any) -> Dict[str, Any]:
+    if hasattr(model, "model_dump") and callable(getattr(model, "model_dump")):
+        return model.model_dump()
+    if hasattr(model, "dict") and callable(getattr(model, "dict")):
+        return model.dict()
+    return vars(model)
+
 def verify_pin(request: Request, x_auth_pin: str = Header(None)):
-    if request.client.host == "127.0.0.1":
+    if not state.auth_pin:
         return
-    if x_auth_pin != state.auth_pin:
-        logger.warning(f"Invalid PIN received: {x_auth_pin!r} (expected {state.auth_pin!r}) from {request.client.host}")
+    if not x_auth_pin or not secrets.compare_digest(str(x_auth_pin).strip(), str(state.auth_pin).strip()):
+        client_host = request.client.host if request.client else "unknown"
+        logger.warning(f"Unauthorized API access attempt blocked from {client_host}")
         raise HTTPException(status_code=401, detail="Invalid PIN")
 
 @router.get("/", response_class=HTMLResponse)
@@ -28,18 +38,21 @@ async def get_index():
 
 @router.get("/web", response_class=HTMLResponse)
 async def get_web():
-    return FileResponse("web_companion.html")
+    response = FileResponse("web_companion.html")
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, pin: str = None):
-    await ws_manager.connect(websocket)
-    if websocket.client.host != "127.0.0.1":
-        if pin != state.auth_pin:
+    if state.auth_pin:
+        if not pin or not secrets.compare_digest(str(pin).strip(), str(state.auth_pin).strip()):
             await websocket.close(code=1008)
-            ws_manager.disconnect(websocket)
             return
+    await ws_manager.connect(websocket)
     try:
-        await websocket.send_text(json.dumps(state.to_dict())) # Wait, json is needed.
+        await websocket.send_text(json.dumps(state.to_dict()))
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
@@ -83,7 +96,24 @@ async def update_config(cfg: ConfigModel):
     state.signal_cooldown_hours = cfg.signal_cooldown_hours
     state.discord_webhook_url = cfg.discord_webhook_url
     saved_cfg = await load_config_item("risk_config") or {}
-    cfg_dict = cfg.dict()
+    cfg_dict = dump_pydantic_model(cfg)
+
+    raw_input_ids = getattr(cfg, "allowed_discord_user_ids", None)
+    if raw_input_ids == "CLEAR" or raw_input_ids == []:
+        state.allowed_discord_user_ids = []
+    elif isinstance(raw_input_ids, list) and raw_input_ids:
+        state.allowed_discord_user_ids = [str(x).strip() for x in raw_input_ids if str(x).strip()]
+    elif isinstance(raw_input_ids, str) and raw_input_ids.strip():
+        state.allowed_discord_user_ids = [x.strip() for x in raw_input_ids.split(",") if x.strip()]
+    else:
+        fallback_ids = saved_cfg.get("allowed_discord_user_ids")
+        if fallback_ids is None:
+            fallback_ids = state.allowed_discord_user_ids
+        if isinstance(fallback_ids, list):
+            state.allowed_discord_user_ids = [str(x).strip() for x in fallback_ids if str(x).strip()]
+        elif isinstance(fallback_ids, str) and fallback_ids.strip():
+            state.allowed_discord_user_ids = [x.strip() for x in fallback_ids.split(",") if x.strip()]
+    cfg_dict["allowed_discord_user_ids"] = state.allowed_discord_user_ids
 
     if cfg.api_key and cfg.secret_key:
         cipher = get_cipher(state.auth_pin)
@@ -145,9 +175,9 @@ async def get_logs():
     return JSONResponse({"logs": list(recent_logs)})
 
 @router.get("/api/trades", dependencies=[Depends(verify_pin)])
-async def get_trades():
+async def get_trades(limit: int = 100):
     from engine.db import get_trade_history, get_pnl_summary
-    history = await get_trade_history(limit=50, is_testnet=state.testnet)
+    history = await get_trade_history(limit=limit, is_testnet=state.testnet)
     summary = await get_pnl_summary(is_testnet=state.testnet)
     return JSONResponse({
         "trades": history,
@@ -161,6 +191,14 @@ async def clear_trades(only_rejected: bool = True):
     logger.info(f"Purged {deleted} trade records (only_rejected={only_rejected}).")
     await broadcast_state()
     return JSONResponse({"status": "ok", "deleted": deleted})
+
+@router.post("/api/trades/deduplicate", dependencies=[Depends(verify_pin)])
+async def api_deduplicate_trades():
+    from engine.db import deduplicate_trade_history
+    deleted = await deduplicate_trade_history(is_testnet=state.testnet)
+    logger.info(f"Manual trade deduplication triggered: {deleted} duplicates removed.")
+    await broadcast_state()
+    return JSONResponse({"status": "ok", "pruned_duplicates": deleted})
 
 @router.post("/api/discord/test", dependencies=[Depends(verify_pin)])
 async def test_discord_connection():
@@ -197,7 +235,7 @@ async def test_discord_connection():
             return JSONResponse({"status": "error", "message": f"Channel ID {clean_channel_id} not found or Bot not invited to server."})
 
         embed = discord.Embed(
-            title="✅ Cripto-3DS Discord Bot Connected",
+            title="Cripto-3DS Discord Bot Connected",
             description="Discord bot communication test successful! Interactive buttons and slash commands are active.",
             color=0x50fa7b
         )
@@ -336,12 +374,18 @@ async def get_news_insights():
     data = await summarize_news_insights(state.gemini_api_key, state.gemini_model)
     return JSONResponse(data)
 
+@router.post("/api/sync/trades_2026", dependencies=[Depends(verify_pin)])
+async def api_sync_2026_trades():
+    from engine.trades import sync_binance_2026_trades
+    res = await sync_binance_2026_trades()
+    return JSONResponse(res)
+
 @router.post("/api/test/run", dependencies=[Depends(verify_pin)])
 async def api_run_test_suite():
-    import asyncio, time
+    import asyncio, time, sys
     start = time.time()
     proc = await asyncio.create_subprocess_exec(
-        ".venv/bin/python3", "-m", "pytest", "tests/test_engine.py", "-k", "not test_api_run_test_suite", "-v",
+        sys.executable, "-m", "pytest", "tests/test_engine.py", "-k", "not test_api_run_test_suite", "-v",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
@@ -356,3 +400,4 @@ async def api_run_test_suite():
         "duration": duration,
         "log": output
     }
+

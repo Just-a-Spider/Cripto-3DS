@@ -5,7 +5,8 @@ import os
 from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger("CriptoBotEngine.DB")
-DB_PATH = "bot_data.db"
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, "bot_data.db")
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -47,6 +48,13 @@ async def init_db():
         """)
         await db.commit()
 
+        # Database indexes for speed and zero-contention filtering
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_trade_history_spend ON trade_history (is_testnet, action, status, timestamp);")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_trade_history_pair ON trade_history (pair, is_testnet, status);")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_trade_history_order ON trade_history (binance_order_id);")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_trade_history_ts ON trade_history (is_testnet, timestamp DESC);")
+        await db.commit()
+
         # Schema auto-migration if upgrading existing db
         try:
             await db.execute("ALTER TABLE trade_history ADD COLUMN realized_pnl_usdt REAL DEFAULT 0.0")
@@ -55,6 +63,7 @@ async def init_db():
         except Exception:
             pass # Columns already exist
 
+        await deduplicate_trade_history()
         logger.info("SQLite database initialized successfully.")
 
 async def save_config_item(key: str, value: Any):
@@ -83,24 +92,32 @@ async def log_trade(
     order_id: str = "",
     is_testnet: bool = True,
     realized_pnl_usdt: float = 0.0,
-    realized_pnl_percent: float = 0.0
+    realized_pnl_percent: float = 0.0,
+    timestamp: Optional[float] = None
 ):
     import time
+    ts = timestamp if timestamp is not None else time.time()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """INSERT INTO trade_history 
                (timestamp, pair, action, amount_usdt, price, status, binance_order_id, is_testnet, realized_pnl_usdt, realized_pnl_percent) 
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (time.time(), pair, action, amount_usdt, price, status, order_id, int(is_testnet), realized_pnl_usdt, realized_pnl_percent)
+            (ts, pair, action, amount_usdt, price, status, order_id, int(is_testnet), realized_pnl_usdt, realized_pnl_percent)
         )
         await db.commit()
 
-async def get_trade_history(limit: int = 50, is_testnet: bool = True) -> List[Dict[str, Any]]:
+async def get_trade_history(limit: int = 100, is_testnet: bool = True) -> List[Dict[str, Any]]:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM trade_history WHERE is_testnet = ? ORDER BY id DESC LIMIT ?", (int(is_testnet), limit)) as cursor:
+        async with db.execute("SELECT * FROM trade_history WHERE is_testnet = ? ORDER BY timestamp DESC, id DESC LIMIT ?", (int(is_testnet), limit)) as cursor:
             rows = await cursor.fetchall()
-            return [dict(r) for r in rows]
+            trades = []
+            for r in rows:
+                d = dict(r)
+                if "order_id" not in d and "binance_order_id" in d:
+                    d["order_id"] = d["binance_order_id"]
+                trades.append(d)
+            return trades
 
 async def get_pnl_summary(is_testnet: bool = True) -> Dict[str, Any]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -131,7 +148,7 @@ async def get_pnl_summary(is_testnet: bool = True) -> Dict[str, Any]:
 
 async def get_average_buy_price(pair: str, is_testnet: bool) -> float:
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT amount_usdt, price FROM trade_history WHERE pair = ? AND action = 'BUY' AND status = 'EXECUTED' AND is_testnet = ? ORDER BY id DESC LIMIT 20", (pair, int(is_testnet))) as cursor:
+        async with db.execute("SELECT amount_usdt, price FROM trade_history WHERE pair = ? AND action = 'BUY' AND status = 'EXECUTED' AND is_testnet = ? ORDER BY timestamp DESC, id DESC LIMIT 20", (pair, int(is_testnet))) as cursor:
             rows = await cursor.fetchall()
             if not rows: return 0.0
             total_cost = sum([r[0] for r in rows])
@@ -173,3 +190,88 @@ async def get_cached_news(limit: int = 10) -> List[Dict[str, Any]]:
         async with db.execute("SELECT * FROM news_cache ORDER BY id DESC LIMIT ?", (limit,)) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
+
+async def get_rolling_daily_spend(is_testnet: bool = True, window_seconds: float = 86400.0) -> float:
+    import time
+    since_ts = time.time() - window_seconds
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT COALESCE(SUM(amount_usdt), 0.0) 
+               FROM trade_history 
+               WHERE action = 'BUY' AND status = 'EXECUTED' AND is_testnet = ? AND timestamp >= ?""",
+            (int(is_testnet), since_ts)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return float(row[0]) if row else 0.0
+
+async def order_exists(binance_order_id: str, is_testnet: bool = True) -> bool:
+    if not binance_order_id:
+        return False
+    ref = str(binance_order_id).strip()
+    if ref in ("SIMULATED_ORDER", "SIMULATED", "None", ""):
+        return False
+    base_oid = ref.split("_")[0] if "_" in ref else ref
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """SELECT 1 FROM trade_history 
+               WHERE is_testnet = ? 
+               AND (
+                   binance_order_id = ? 
+                   OR binance_order_id = ? 
+                   OR binance_order_id LIKE ?
+               ) LIMIT 1""",
+            (int(is_testnet), ref, base_oid, f"{base_oid}_%")
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row is not None
+
+async def deduplicate_trade_history(is_testnet: Optional[bool] = None) -> int:
+    """
+    Scans and purges redundant or duplicate trade records:
+    1. Duplicate identical binance_order_ids.
+    2. Overlapping live OID records when detailed OID_TID synced fills exist.
+    """
+    total_deleted = 0
+    testnet_clause = f"AND is_testnet = {int(is_testnet)}" if is_testnet is not None else ""
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Step 1: Exact duplicate binance_order_id
+        cursor = await db.execute(f"""
+            DELETE FROM trade_history
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM trade_history
+                WHERE binance_order_id IS NOT NULL 
+                  AND binance_order_id != '' 
+                  AND binance_order_id NOT IN ('SIMULATED_ORDER', 'SIMULATED', 'None')
+                  {testnet_clause}
+                GROUP BY is_testnet, binance_order_id
+            )
+            AND binance_order_id IS NOT NULL 
+            AND binance_order_id != '' 
+            AND binance_order_id NOT IN ('SIMULATED_ORDER', 'SIMULATED', 'None')
+            {testnet_clause}
+        """)
+        total_deleted += cursor.rowcount
+
+        # Step 2: Delete bare OID orders if detailed OID_TID exists
+        cursor = await db.execute(f"""
+            DELETE FROM trade_history
+            WHERE binance_order_id IS NOT NULL
+            AND binance_order_id != ''
+            AND binance_order_id NOT IN ('SIMULATED_ORDER', 'SIMULATED', 'None')
+            {testnet_clause}
+            AND EXISTS (
+                SELECT 1 FROM trade_history th2
+                WHERE th2.is_testnet = trade_history.is_testnet
+                AND th2.binance_order_id LIKE (trade_history.binance_order_id || '_%')
+            )
+        """)
+        total_deleted += cursor.rowcount
+
+        await db.commit()
+
+    if total_deleted > 0:
+        logger.info(f"Deduplicated trade history: pruned {total_deleted} redundant trade records.")
+    return total_deleted
+

@@ -11,6 +11,7 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
         addr = writer.get_extra_info('peername')
         logger.info(f"3DS Client connected from {addr}")
         client_auth = {"authenticated": False}
+        auth_event = asyncio.Event()
 
         async def command_reader():
             while True:
@@ -28,11 +29,12 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                     pin = cmd.split(" ")[1] if len(cmd.split(" ")) > 1 else ""
                     if pin == state.auth_pin:
                         client_auth["authenticated"] = True
+                        auth_event.set()
                         writer.write(b"AUTH_OK\n")
                         logger.info("3DS Client authentication successful.")
                     else:
                         writer.write(b"AUTH_FAIL\n")
-                        logger.warning(f"3DS Client authentication failed (invalid PIN: {pin!r})")
+                        logger.warning("3DS Client authentication failed (invalid PIN)")
                     await writer.drain()
                     continue
 
@@ -46,7 +48,7 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                         provided_pin = parts[1]
                     else:
                         if action in ["EMERGENCY_STOP", "PAUSE", "TOGGLE_DCA", "FORCE_EVALUATE", "APPROVE", "REJECT"]:
-                            logger.warning(f"Invalid PIN provided for action {action}: {parts[1]!r}")
+                            logger.warning(f"Invalid PIN provided for action {action}")
                             writer.write(b"AUTH_FAIL\n")
                             await writer.drain()
                             continue
@@ -56,7 +58,7 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                     param = parts[1]
                     provided_pin = parts[2]
                     if provided_pin != state.auth_pin:
-                        logger.warning(f"Invalid PIN for action {action}|{param}: {provided_pin!r}")
+                        logger.warning(f"Invalid PIN for action {action}|{param}")
                         writer.write(b"AUTH_FAIL\n")
                         await writer.drain()
                         continue
@@ -64,6 +66,7 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                 # Enforce authentication either via session or per-action PIN payload
                 if provided_pin == state.auth_pin:
                     client_auth["authenticated"] = True
+                    auth_event.set()
 
                 if not client_auth["authenticated"]:
                     writer.write(b"NOT_AUTHENTICATED\n")
@@ -108,12 +111,32 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                         pass
 
                 elif action == "APPROVE":
-                    res = await decide_trade(True)
-                    logger.info(f"3DS Action executed: APPROVE -> {res}")
+                    tid = None
+                    target_pair = None
+                    if param:
+                        try:
+                            tid = int(param)
+                        except ValueError:
+                            target_pair = param.strip()
+                    if tid is None and target_pair is None:
+                        curr_p = state.favorite_pairs[state.current_pair_idx] if state.favorite_pairs else None
+                        target_pair = curr_p
+                    res = await decide_trade(True, trade_id=tid, pair=target_pair)
+                    logger.info(f"3DS Action executed: APPROVE (tid={tid}, pair={target_pair}) -> {res.get('status')}")
 
                 elif action == "REJECT":
-                    res = await decide_trade(False)
-                    logger.info(f"3DS Action executed: REJECT -> {res}")
+                    tid = None
+                    target_pair = None
+                    if param:
+                        try:
+                            tid = int(param)
+                        except ValueError:
+                            target_pair = param.strip()
+                    if tid is None and target_pair is None:
+                        curr_p = state.favorite_pairs[state.current_pair_idx] if state.favorite_pairs else None
+                        target_pair = curr_p
+                    res = await decide_trade(False, trade_id=tid, pair=target_pair)
+                    logger.info(f"3DS Action executed: REJECT (tid={tid}, pair={target_pair}) -> {res.get('status')}")
 
                 elif action == "CLEAR_BUY" and param:
                     pair = param
@@ -132,10 +155,8 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                     logger.info(f"3DS Action executed: CLEAR_SELL for {pair}")
 
         async def telemetry_streamer():
+            await auth_event.wait()
             while True:
-                if not client_auth["authenticated"]:
-                    await asyncio.sleep(0.1)
-                    continue
 
                 if state.favorite_pairs:
                     state.current_pair_idx = (state.current_pair_idx + 1) % len(state.favorite_pairs)
