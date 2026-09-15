@@ -56,7 +56,7 @@ class SessionManager:
         res = []
         for m in entry.history.messages:
             role = "user" if isinstance(m, HumanMessage) else ("assistant" if isinstance(m, AIMessage) else "system")
-            res.append({"role": role, "content": str(m.content)})
+            res.append({"role": role, "content": ai_provider.extract_text_from_ai_message(m.content)})
         return res
 
     def clear_session(self, session_id: str) -> bool:
@@ -188,14 +188,21 @@ Live Market Context:
         except Exception:
             executable = primary_model
 
-    # Construct conversation messages with history
+    # Construct conversation messages with sanitized history
     messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
-    messages.extend(entry.history.messages)
+    for m in entry.history.messages:
+        clean_text = ai_provider.extract_text_from_ai_message(m.content)
+        if isinstance(m, HumanMessage):
+            messages.append(HumanMessage(content=clean_text))
+        elif isinstance(m, AIMessage):
+            messages.append(AIMessage(content=clean_text))
+        else:
+            messages.append(m)
     messages.append(HumanMessage(content=query))
 
     try:
         response = await executable.ainvoke(messages) # type: ignore
-        answer = str(getattr(response, "content", response)).strip()
+        answer = ai_provider.extract_text_from_ai_message(response)
 
         # Update history
         entry.history.add_user_message(query)

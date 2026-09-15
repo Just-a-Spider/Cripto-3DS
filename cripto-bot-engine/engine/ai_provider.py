@@ -268,6 +268,58 @@ def get_chat_model(
         return None
 
 
+def extract_text_from_ai_message(content: Any) -> str:
+    """
+    Safely extracts clean plain-text string from LangChain AIMessage content,
+    handling lists of dicts (e.g. [{'type': 'text', 'text': '...', 'extras': {...}}]),
+    thought blocks, stringified Python reprs, and nested multi-turn structures.
+    """
+    if hasattr(content, "content"):
+        content = content.content
+
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                if item.get("type") == "thought":
+                    continue
+                txt = item.get("text") or item.get("content") or ""
+                parts.append(str(txt))
+            elif isinstance(item, str):
+                parts.append(item)
+            elif hasattr(item, "text"):
+                parts.append(str(item.text))
+            else:
+                parts.append(str(item))
+        raw_text = "".join(parts).strip()
+    elif isinstance(content, dict):
+        if content.get("type") == "thought":
+            raw_text = ""
+        else:
+            raw_text = str(content.get("text") or content.get("content") or "").strip()
+    else:
+        raw_text = str(content or "").strip()
+
+    # Safety check: if raw_text itself is a stringified Python repr or JSON of a list or dict
+    trimmed = raw_text.strip()
+    if (trimmed.startswith("[") or trimmed.startswith("{")) and ("'text':" in trimmed or '"text":' in trimmed):
+        try:
+            import ast
+            parsed = ast.literal_eval(trimmed)
+            if isinstance(parsed, (list, dict)):
+                return extract_text_from_ai_message(parsed)
+        except Exception:
+            try:
+                import json
+                parsed = json.loads(trimmed)
+                if isinstance(parsed, (list, dict)):
+                    return extract_text_from_ai_message(parsed)
+            except Exception:
+                pass
+
+    return raw_text
+
+
 async def execute_ai_completion(
     prompt: str,
     system_instruction: str = "",
@@ -327,14 +379,7 @@ async def execute_ai_completion(
 
     try:
         response = await executable_model.ainvoke(messages)
-        if hasattr(response, "content"):
-            content = response.content
-            if isinstance(content, list):
-                # Join multimodal chunks or text parts
-                text_parts = [str(x) if not isinstance(x, dict) else x.get("text", "") for x in content]
-                return "".join(text_parts).strip()
-            return str(content).strip()
-        return str(response).strip()
+        return extract_text_from_ai_message(response)
     except Exception as e:
         logger.warning(f"LangChain completion execution failed: {e}")
         # If primary failed and wasn't wrapped with fallback, try fallback manually
@@ -342,7 +387,7 @@ async def execute_ai_completion(
             try:
                 logger.info("Attempting manual execution on secondary fallback model...")
                 fb_res = await fallback.ainvoke(messages)
-                return str(getattr(fb_res, "content", fb_res)).strip()
+                return extract_text_from_ai_message(fb_res)
             except Exception as fb_err:
                 logger.error(f"Fallback model execution also failed: {fb_err}")
         return None
@@ -380,7 +425,7 @@ async def test_ai_connection(
         ]
         res = await model.ainvoke(messages)
         latency_ms = int((time.time() - start) * 1000)
-        reply = str(getattr(res, "content", res)).strip()
+        reply = extract_text_from_ai_message(res)
         return {
             "status": "ok",
             "provider": provider,

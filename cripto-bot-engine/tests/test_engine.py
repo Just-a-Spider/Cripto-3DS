@@ -2208,6 +2208,40 @@ async def test_ai_config_persistence_and_encryption():
     assert d["has_ai"] is True
 
 
+def test_extract_text_from_ai_message_and_multimodal_blocks():
+    from engine.ai_provider import extract_text_from_ai_message
+    from langchain_core.messages import AIMessage
+
+    # 1. Plain string
+    assert extract_text_from_ai_message("Hello BTC") == "Hello BTC"
+
+    # 2. List of dict parts with signature extras (exact Google GenAI SDK artifact)
+    raw_blocks = [
+        {
+            "type": "text",
+            "text": "Market Overview & Portfolio Status:\n\n* Market Sentiment: 50/100",
+            "extras": {"signature": "El4KXAERTTIP..."}
+        }
+    ]
+    msg = AIMessage(content=raw_blocks)
+    cleaned = extract_text_from_ai_message(msg)
+    assert cleaned == "Market Overview & Portfolio Status:\n\n* Market Sentiment: 50/100"
+    assert "signature" not in cleaned
+    assert "extras" not in cleaned
+
+    # 3. Stringified nested python repr (simulating previous turn contamination)
+    contaminated = str([{"type": "text", "text": str(raw_blocks), "extras": {"signature": "xyz"}}])
+    cleaned_nested = extract_text_from_ai_message(contaminated)
+    assert cleaned_nested == "Market Overview & Portfolio Status:\n\n* Market Sentiment: 50/100"
+
+    # 4. Thought blocks filtered out
+    mixed = [
+        {"type": "thought", "thought": "Thinking about RSI levels..."},
+        {"type": "text", "text": "RSI is 45 (Neutral)."}
+    ]
+    assert extract_text_from_ai_message(mixed) == "RSI is 45 (Neutral)."
+
+
 
 
 

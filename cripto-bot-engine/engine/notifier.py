@@ -594,14 +594,23 @@ class DiscordBotService:
                 fallback_model=getattr(state, "ai_fallback_model", "llama-3.3-70b-versatile"),
                 fallback_api_key=fb_key
             )
-            answer = res.get("answer", "")
+            from engine.ai_provider import extract_text_from_ai_message
+            raw_ans = res.get("answer", "")
+            answer = extract_text_from_ai_message(raw_ans)
             turns = res.get("turn_count", 1)
+            prov = getattr(state, "ai_provider", "google")
+            prov_display = "OpenAI" if prov.lower() == "openai" else ("Ollama" if prov.lower() == "ollama" else prov.title())
+            model_display = getattr(state, "ai_model", "gemini-3.1-flash")
+
+            if len(answer) > 4000:
+                answer = answer[:3950] + "\n\n*(Truncated to fit Discord embed limit)*"
+
             embed = discord.Embed(
-                title=f"{state.ai_provider.title()} AI Market Analyst",
-                description=answer[:4000],
+                title=f"{prov_display} AI Market Analyst",
+                description=answer,
                 color=0xbd93f9
             )
-            embed.set_footer(text=f"Model: {state.ai_model} • Provider: {state.ai_provider.title()} • Turn #{turns}")
+            embed.set_footer(text=f"Model: {model_display} • Provider: {prov_display} • Turn #{turns}")
             await interaction.followup.send(f"**Q:** *{question}*", embed=embed)
 
         @self.tree.command(name="clearsession", description="Clear your conversation memory and reset AI session")
