@@ -442,6 +442,7 @@ class DiscordBotService:
             embed.add_field(name="Engine State", value=status_str, inline=True)
             embed.add_field(name="Mode", value=mode_str, inline=True)
             embed.add_field(name="USDT Available", value=f"${state.usdt_balance:.2f}", inline=True)
+            embed.add_field(name="AI Provider", value=f"{state.ai_provider.upper()} ({state.ai_model})", inline=True)
             
             lines = []
             for pair in state.favorite_pairs:
@@ -572,25 +573,46 @@ class DiscordBotService:
             embed.set_footer(text="Cripto-3DS Engine • Live Market Analytics")
             await interaction.followup.send(embed=embed, file=file)
 
-        @self.tree.command(name="ask", description="Ask Gemini AI about market conditions, technicals, or crypto strategies")
+        @self.tree.command(name="ask", description="Ask AI Analyst about market conditions, technicals, or crypto strategies")
         @app_commands.describe(question="Your market or technical trading question")
         async def cmd_ask(interaction: discord.Interaction, question: str):
             from engine.state import state
-            from engine.ai_analyst import ask_gemini
+            from engine.ai_session import execute_chat_turn
             await interaction.response.defer()
-            answer = await ask_gemini(
+            sid = f"discord_{interaction.channel_id}_{interaction.user.id}"
+            key = getattr(state, "ai_api_key", "") or getattr(state, "gemini_api_key", "")
+            fb_key = getattr(state, "ai_fallback_api_key", "") or getattr(state, "groq_api_key", "")
+            res = await execute_chat_turn(
                 query=question,
+                session_id=sid,
                 market_context=state.to_dict(),
-                api_key=state.gemini_api_key,
-                model=state.gemini_model
+                provider=getattr(state, "ai_provider", "google"),
+                model=getattr(state, "ai_model", "gemini-3.1-flash"),
+                api_key=key,
+                base_url=getattr(state, "ai_base_url", ""),
+                fallback_provider=getattr(state, "ai_fallback_provider", "groq"),
+                fallback_model=getattr(state, "ai_fallback_model", "llama-3.3-70b-versatile"),
+                fallback_api_key=fb_key
             )
+            answer = res.get("answer", "")
+            turns = res.get("turn_count", 1)
             embed = discord.Embed(
-                title="Gemini AI Market Analyst",
+                title=f"{state.ai_provider.title()} AI Market Analyst",
                 description=answer[:4000],
                 color=0xbd93f9
             )
-            embed.set_footer(text=f"Model: {state.gemini_model} • Google AI Studio")
+            embed.set_footer(text=f"Model: {state.ai_model} • Provider: {state.ai_provider.title()} • Turn #{turns}")
             await interaction.followup.send(f"**Q:** *{question}*", embed=embed)
+
+        @self.tree.command(name="clearsession", description="Clear your conversation memory and reset AI session")
+        async def cmd_clearsession(interaction: discord.Interaction):
+            from engine.ai_session import session_manager
+            sid = f"discord_{interaction.channel_id}_{interaction.user.id}"
+            cleared = session_manager.clear_session(sid)
+            if cleared:
+                await interaction.response.send_message("AI conversation session cleared for this channel. Memory reset.", ephemeral=True)
+            else:
+                await interaction.response.send_message("No active conversation session found to clear.", ephemeral=True)
 
         @self.tree.command(name="briefing", description="Generate live AI morning market & portfolio briefing")
         async def cmd_briefing(interaction: discord.Interaction):
@@ -869,7 +891,7 @@ class DiscordBotService:
                 hist = state.rsi_strategy.price_histories.get(pair, [])
                 _, _, _, pct_b = calculate_bollinger_bands(hist, 20, 2.0)
                 ai_data = None
-                if state.gemini_api_key or getattr(state, "groq_api_key", ""):
+                if state.has_ai:
                     try:
                         ai_data = await asyncio.wait_for(
                             analyze_trade_signal(
@@ -880,8 +902,8 @@ class DiscordBotService:
                                 pct_b=pct_b,
                                 reason=t.get("reason", ""),
                                 price_history=hist,
-                                api_key=state.gemini_api_key,
-                                model=state.gemini_model
+                                api_key=state.ai_api_key or state.gemini_api_key,
+                                model=state.ai_model or state.gemini_model
                             ),
                             timeout=4.5
                         )

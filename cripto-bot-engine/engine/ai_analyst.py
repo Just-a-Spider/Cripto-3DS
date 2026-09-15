@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any, List, Union
 
 logger = logging.getLogger("CriptoBotEngine")
 
-DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_GEMINI_MODEL = "gemini-3.1-flash"
 DEFAULT_GEMINI_SEARCH_MODEL = "gemini-3.1-flash-lite"
 
 # In-memory cache for Fear & Greed Index (1 hour TTL)
@@ -383,6 +383,74 @@ async def call_gemini(
     return None
 
 
+_ORIGINAL_CALL_GEMINI = call_gemini
+
+async def call_ai(
+    prompt: str,
+    system_instruction: str = "",
+    json_mode: bool = False,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    use_google_search: bool = False
+) -> Optional[str]:
+    """
+    Unified LangChain AI invoker supporting all configured providers.
+    Transparently honors monkeypatched call_gemini or call_groq in test environments.
+    """
+    import sys
+    this_mod = sys.modules.get(__name__)
+    if this_mod and getattr(this_mod, "call_gemini", None) != _ORIGINAL_CALL_GEMINI:
+        return await this_mod.call_gemini(
+            prompt,
+            api_key=api_key or "",
+            model=model or "",
+            system_instruction=system_instruction,
+            json_mode=json_mode,
+            use_google_search=use_google_search
+        )
+
+    from engine.state import state
+    from engine.ai_provider import execute_ai_completion
+
+    target_prov = (provider or getattr(state, "ai_provider", "google")).strip().lower()
+    target_model = model or getattr(state, "ai_model", DEFAULT_GEMINI_MODEL)
+    target_key = api_key or getattr(state, "ai_api_key", "") or (getattr(state, "gemini_api_key", "") if target_prov == "google" else "")
+    target_base = base_url or getattr(state, "ai_base_url", "")
+    fb_prov = getattr(state, "ai_fallback_provider", "groq")
+    fb_model = getattr(state, "ai_fallback_model", "llama-3.3-70b-versatile")
+    fb_key = getattr(state, "ai_fallback_api_key", "") or getattr(state, "groq_api_key", "")
+
+    res = await execute_ai_completion(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        json_mode=json_mode,
+        provider=target_prov,
+        model=target_model,
+        api_key=target_key,
+        base_url=target_base,
+        fallback_provider=fb_prov,
+        fallback_model=fb_model,
+        fallback_api_key=fb_key
+    )
+    if res:
+        return res
+
+    # Fallback to legacy REST call_gemini if google
+    if target_prov == "google" and target_key:
+        return await _ORIGINAL_CALL_GEMINI(
+            prompt,
+            target_key,
+            model=target_model,
+            system_instruction=system_instruction,
+            json_mode=json_mode,
+            use_google_search=use_google_search
+        )
+
+    return None
+
+
 async def fallback_trade_signal_analysis(
     pair: str,
     action: str,
@@ -624,7 +692,7 @@ Return JSON with exact keys:
 }}
 """
     system_inst = "You are a senior quantitative crypto risk analyst. Be concise, objective, and return strictly valid JSON."
-    raw_response = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True)
+    raw_response = await call_ai(prompt, api_key=api_key, model=model, system_instruction=system_inst, json_mode=True)
     
     if not raw_response:
         logger.info(f"Using algorithmic risk evaluation fallback for {pair} {action}...")
@@ -724,7 +792,7 @@ Synthesize these findings into valid JSON:
 }}
 """
     system_inst = "You are a senior quantitative financial news analyst. Return strictly valid JSON."
-    raw = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True, use_google_search=False)
+    raw = await call_ai(prompt, api_key=api_key, model=model, system_instruction=system_inst, json_mode=True, use_google_search=False)
 
     if not raw:
         return fallback_news_synthesis(cached)
@@ -743,18 +811,26 @@ Synthesize these findings into valid JSON:
         return fallback_news_synthesis(cached)
 
 
-async def ask_gemini(
+async def ask_ai(
     query: str,
     market_context: Dict[str, Any],
-    api_key: str,
-    model: str = DEFAULT_GEMINI_MODEL
+    api_key: str = "",
+    model: str = "",
+    session_id: str = "default"
 ) -> str:
     """
     Answers user market or trading questions with complete live bot context, all favorite assets,
     active portfolio positions, cost bases, unrealized PnL, and macro sentiment.
+    Maintains multi-turn conversational memory via session_id.
     """
-    if not api_key:
-        return "[WARNING] Google AI Studio API key not configured. Add your free key in Web Companion Settings to enable AI features."
+    from engine.state import state
+    prov = getattr(state, "ai_provider", "google")
+    key = api_key or getattr(state, "ai_api_key", "") or (getattr(state, "gemini_api_key", "") if prov == "google" else "")
+
+    if not key and prov != "ollama":
+        if prov == "google":
+            return "[WARNING] Google AI Studio API key not configured. Add your free key in Web Companion Settings to enable AI features."
+        return f"[WARNING] {prov.title()} API key not configured. Add your key in Web Companion Settings to enable AI features."
 
     fng = await fetch_fear_and_greed_index()
     fng_str = f"{fng.get('value', 50)}/100 ({fng.get('classification', 'Neutral')})"
@@ -809,8 +885,11 @@ Live Bot Market Context:
 Please answer the user's question clearly, incorporating live technicals, open position PnL, and macro sentiment across the entire watchlist where relevant. Keep response concise, actionable, and formatted nicely in Discord markdown.
 """
     system_inst = "You are Cripto-3DS AI Assistant, an expert quantitative cryptocurrency analyst and algorithmic trading assistant."
-    result = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, use_google_search=False)
-    return result or "[AI OUTAGE] Google Gemini is currently experiencing high demand (HTTP 503). Configure a free Groq Cloud API key in Settings or .env (GROQ_API_KEY) for zero-downtime backup."
+    result = await call_ai(prompt, system_instruction=system_inst, model=model, api_key=key, use_google_search=False)
+    return result or "[AI OUTAGE] AI provider is currently unavailable. Please check settings or backup keys."
+
+# Backward compatibility alias
+ask_gemini = ask_ai
 
 
 async def generate_market_briefing(
@@ -870,7 +949,7 @@ Return JSON with exact keys:
 }}
 """
     system_inst = "You are a Chief Quantitative Crypto Strategist. Produce structured, highly accurate daily briefing JSON."
-    raw_response = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True)
+    raw_response = await call_ai(prompt, api_key=api_key, model=model, system_instruction=system_inst, json_mode=True)
     
     headline = "Crypto Market Morning Intelligence"
     macro = "Market consolidating across key levels."
@@ -978,7 +1057,7 @@ Return JSON strictly with format:
 }}
 """
     system_inst = "You are a Chief Quantitative Crypto Technical Analyst. Return strictly valid JSON ranking top actionable setups."
-    raw = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True)
+    raw = await call_ai(prompt, api_key=api_key, model=model, system_instruction=system_inst, json_mode=True)
 
     if not raw:
         return fallback_scan_market_opportunities(market_context, market_regime, fng_str, fng_val)
@@ -1048,7 +1127,7 @@ Return JSON with exact keys:
 }}
 """
     system_inst = "You are a quantitative momentum trading specialist. Evaluate if an overbought asset should trail higher or exit immediately."
-    raw_response = await call_gemini(prompt, api_key, model=model, system_instruction=system_inst, json_mode=True)
+    raw_response = await call_ai(prompt, api_key=api_key, model=model, system_instruction=system_inst, json_mode=True)
 
     if not raw_response:
         return {

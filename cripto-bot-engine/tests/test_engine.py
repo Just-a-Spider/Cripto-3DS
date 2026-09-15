@@ -1979,6 +1979,236 @@ async def test_gemini_outage_capped_models_and_fast_bypass(monkeypatch):
     clear_model_cooldowns()
 
 
+@pytest.mark.asyncio
+async def test_langchain_provider_factory():
+    from engine.ai_provider import get_chat_model
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_openai import ChatOpenAI
+    from langchain_anthropic import ChatAnthropic
+    from langchain_groq import ChatGroq
+
+    # 1. Google
+    m_google = get_chat_model("google", model_name="gemini-3.1-flash", api_key="test_google_key")
+    assert isinstance(m_google, ChatGoogleGenerativeAI)
+    assert m_google.model == "gemini-3.1-flash"
+
+    # 2. OpenAI
+    m_openai = get_chat_model("openai", model_name="gpt-4o-mini", api_key="sk-test")
+    assert isinstance(m_openai, ChatOpenAI)
+    assert m_openai.model_name == "gpt-4o-mini"
+
+    # 3. Anthropic
+    m_anthropic = get_chat_model("anthropic", model_name="claude-3-5-haiku-latest", api_key="sk-ant-test")
+    assert isinstance(m_anthropic, ChatAnthropic)
+    assert m_anthropic.model == "claude-3-5-haiku-latest"
+
+    # 4. Groq
+    m_groq = get_chat_model("groq", model_name="llama-3.3-70b-versatile", api_key="gsk-test")
+    assert isinstance(m_groq, ChatGroq)
+    assert m_groq.model_name == "llama-3.3-70b-versatile"
+
+    # 5. Ollama
+    m_ollama = get_chat_model("ollama", model_name="llama3.2", base_url="http://localhost:11434/v1")
+    assert isinstance(m_ollama, ChatOpenAI)
+    assert "11434" in str(m_ollama.openai_api_base)
+    assert m_ollama.model_name == "llama3.2"
+
+    # 6. DeepSeek
+    m_deepseek = get_chat_model("deepseek", model_name="deepseek-chat", api_key="sk-ds-test")
+    assert isinstance(m_deepseek, ChatOpenAI)
+    assert "deepseek.com" in str(m_deepseek.openai_api_base)
+
+
+@pytest.mark.asyncio
+async def test_langchain_execute_ai_completion_fallback(monkeypatch):
+    from engine import ai_provider
+    from langchain_core.messages import AIMessage
+
+    class MockFailingModel:
+        async def ainvoke(self, messages):
+            raise RuntimeError("Primary provider rate limited (429)")
+
+        def with_fallbacks(self, fallbacks):
+            self.fallbacks = fallbacks
+            return self
+
+    class MockSuccessfulFallback:
+        async def ainvoke(self, messages):
+            return AIMessage(content="Fallback response from Groq!")
+
+    # Test automatic fallback execution
+    def mock_get_chat_model(provider, *args, **kwargs):
+        if provider == "google":
+            return MockFailingModel()
+        return MockSuccessfulFallback()
+
+    monkeypatch.setattr(ai_provider, "get_chat_model", mock_get_chat_model)
+
+    res = await ai_provider.execute_ai_completion(
+        prompt="Analyze Bitcoin",
+        provider="google",
+        api_key="fake_key",
+        fallback_provider="groq",
+        fallback_api_key="fake_groq_key"
+    )
+    assert res == "Fallback response from Groq!"
+
+
+@pytest.mark.asyncio
+async def test_ai_session_manager_and_history():
+    from engine.ai_session import SessionManager
+
+    mgr = SessionManager()
+    session = mgr.get_or_create_session("test_channel_1")
+    session.history.add_user_message("Hello AI!")
+    session.history.add_ai_message("Hello human trader.")
+
+    hist = mgr.get_history("test_channel_1")
+    assert len(hist) == 2
+    assert hist[0]["role"] == "user"
+    assert hist[0]["content"] == "Hello AI!"
+    assert hist[1]["role"] == "assistant"
+    assert hist[1]["content"] == "Hello human trader."
+
+    # Test pruning
+    for i in range(25):
+        session.history.add_user_message(f"Msg {i}")
+    session.prune(max_messages=10)
+    assert len(session.history.messages) == 10
+
+    # Test clear
+    assert mgr.clear_session("test_channel_1") is True
+    assert len(mgr.get_history("test_channel_1")) == 0
+
+
+@pytest.mark.asyncio
+async def test_ai_execute_chat_turn(monkeypatch):
+    from engine.ai_session import execute_chat_turn, session_manager
+    from engine import ai_provider
+    from langchain_core.messages import AIMessage
+
+    session_manager.clear_session("test_chat_session")
+
+    class MockChatModel:
+        async def ainvoke(self, messages):
+            return AIMessage(content="Bitcoin RSI is consolidating at 45.")
+
+    monkeypatch.setattr(ai_provider, "get_chat_model", lambda *a, **kw: MockChatModel())
+
+    res1 = await execute_chat_turn(
+        query="What is BTC RSI right now?",
+        session_id="test_chat_session",
+        market_context={"prices": {"BTCUSDT": 65000.0}},
+        provider="google",
+        api_key="fake_key"
+    )
+    assert "consolidating" in res1["answer"]
+    assert res1["turn_count"] == 1
+
+    history = session_manager.get_history("test_chat_session")
+    assert len(history) == 2
+    assert history[0]["content"] == "What is BTC RSI right now?"
+    assert history[1]["content"] == "Bitcoin RSI is consolidating at 45."
+
+    session_manager.clear_session("test_chat_session")
+
+
+@pytest.mark.asyncio
+async def test_ai_routes_endpoints():
+    from fastapi.testclient import TestClient
+    from main import app
+    from engine.state import state
+
+    client = TestClient(app)
+    pin = state.auth_pin or "1234"
+
+    # 1. GET /api/ai/providers
+    r1 = client.get("/api/ai/providers")
+    assert r1.status_code == 200
+    providers = r1.json().get("providers", {})
+    assert "google" in providers
+    assert "openai" in providers
+    assert "anthropic" in providers
+    assert "groq" in providers
+    assert "ollama" in providers
+    assert "deepseek" in providers
+
+    # 2. GET /api/ai/models
+    r2 = client.get("/api/ai/models?provider=openai")
+    assert r2.status_code == 200
+    models = r2.json().get("models", [])
+    assert "gpt-4o-mini" in models
+
+    # 3. POST /api/ai/test (Invalid key should report error cleanly)
+    r3 = client.post(
+        "/api/ai/test",
+        headers={"X-Auth-PIN": pin},
+        json={"provider": "custom", "model": "test-model", "api_key": "bad_key", "base_url": "http://127.0.0.1:9999/v1"}
+    )
+    assert r3.status_code == 200
+    assert r3.json()["status"] == "error"
+
+    # 4. GET /api/ai/chat/history & DELETE
+    r4 = client.get("/api/ai/chat/history?session_id=pytest_test", headers={"X-Auth-PIN": pin})
+    assert r4.status_code == 200
+    assert r4.json()["history"] == []
+
+    r5 = client.delete("/api/ai/chat/history?session_id=pytest_test", headers={"X-Auth-PIN": pin})
+    assert r5.status_code == 200
+    assert r5.json()["cleared"] is False
+
+
+@pytest.mark.asyncio
+async def test_ai_config_persistence_and_encryption():
+    from fastapi.testclient import TestClient
+    from main import app
+    from engine.state import state
+    from engine.db import load_config_item
+
+    client = TestClient(app)
+    pin = state.auth_pin or "1234"
+
+    payload = {
+        "max_trade_usdt": 50.0,
+        "max_daily_spend_usdt": 200.0,
+        "min_usdt_reserve": 20.0,
+        "require_human_approval": True,
+        "auth_pin": pin,
+        "ai_provider": "openai",
+        "ai_model": "gpt-4o-mini",
+        "ai_api_key": "sk-proj-secret12345",
+        "ai_base_url": "https://api.openai.com/v1",
+        "ai_fallback_provider": "groq",
+        "ai_fallback_model": "llama-3.3-70b-versatile",
+        "ai_fallback_api_key": "gsk-secret67890"
+    }
+
+    resp = client.post("/api/config", headers={"X-Auth-PIN": pin}, json=payload)
+    assert resp.status_code == 200
+
+    # Verify state updated in memory
+    assert state.ai_provider == "openai"
+    assert state.ai_model == "gpt-4o-mini"
+    assert state.ai_api_key == "sk-proj-secret12345"
+    assert state.ai_base_url == "https://api.openai.com/v1"
+    assert state.ai_fallback_provider == "groq"
+    assert state.ai_fallback_api_key == "gsk-secret67890"
+    assert state.has_ai is True
+
+    # Verify encrypted in DB
+    saved = await load_config_item("risk_config")
+    assert saved is not None
+    assert saved.get("ai_api_key") != "sk-proj-secret12345"  # Encrypted
+    assert len(saved.get("ai_api_key", "")) > 30
+
+    # Verify to_dict includes AI fields
+    d = state.to_dict()
+    assert d["ai_provider"] == "openai"
+    assert d["ai_model"] == "gpt-4o-mini"
+    assert d["has_ai"] is True
+
+
+
 
 
 

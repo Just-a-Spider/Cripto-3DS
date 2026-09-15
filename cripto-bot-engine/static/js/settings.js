@@ -64,30 +64,8 @@ function populateSettingsInputs(data) {
     if (data.has_discord_bot && !document.getElementById("discord-bot-token").value) {
         document.getElementById("discord-bot-token").placeholder = "•••••••••••••••• (Saved)";
     }
-    if (data.has_gemini && !document.getElementById("gemini-api-key").value) {
-        document.getElementById("gemini-api-key").placeholder = "•••••••••••••••• (Saved)";
-    }
-    if (data.has_groq && document.getElementById("groq-api-key") && !document.getElementById("groq-api-key").value) {
-        document.getElementById("groq-api-key").placeholder = "•••••••••••••••• (Saved)";
-    }
-    if (data.groq_model && document.getElementById("groq-model")) {
-        document.getElementById("groq-model").value = data.groq_model;
-    }
-    if (data.enable_search_grounding !== undefined && document.getElementById("enable-search-grounding")) {
-        document.getElementById("enable-search-grounding").checked = Boolean(data.enable_search_grounding);
-    }
-    if (data.available_gemini_models && data.available_gemini_models.length > 0) {
-        const sel = document.getElementById("gemini-model");
-        const curVal = data.gemini_model || sel.value || data.available_gemini_models[0];
-        sel.innerHTML = data.available_gemini_models.map(m => 
-            `<option value="${m}" ${m === curVal ? "selected" : ""}>${m}</option>`
-        ).join("");
-    } else if (data.gemini_model) {
-        document.getElementById("gemini-model").value = data.gemini_model;
-    }
-    if (data.gemini_search_model) {
-        const searchSel = document.getElementById("gemini-search-model");
-        if (searchSel) searchSel.value = data.gemini_search_model;
+    if (typeof populateAiSettingsUI === "function") {
+        populateAiSettingsUI(data);
     }
 }
 
@@ -162,12 +140,7 @@ async function saveConfig() {
         discord_bot_token: document.getElementById("discord-bot-token").value,
         discord_channel_id: document.getElementById("discord-channel-id").value,
         allowed_discord_user_ids: document.getElementById("allowed-discord-user-ids").value,
-        gemini_api_key: document.getElementById("gemini-api-key").value,
-        gemini_model: document.getElementById("gemini-model").value,
-        gemini_search_model: document.getElementById("gemini-search-model").value,
-        enable_search_grounding: document.getElementById("enable-search-grounding") ? document.getElementById("enable-search-grounding").checked : false,
-        groq_api_key: document.getElementById("groq-api-key") ? document.getElementById("groq-api-key").value : "",
-        groq_model: document.getElementById("groq-model") ? document.getElementById("groq-model").value : "llama-3.3-70b-versatile"
+        ...(typeof collectAiConfigPayload === "function" ? collectAiConfigPayload() : {})
     };
     try {
         const res = await fetch(getApiBase() + "/api/config", {
@@ -227,12 +200,7 @@ async function testDiscordBot() {
         discord_bot_token: token,
         discord_channel_id: channel,
         allowed_discord_user_ids: document.getElementById("allowed-discord-user-ids").value,
-        gemini_api_key: document.getElementById("gemini-api-key").value,
-        gemini_model: document.getElementById("gemini-model").value,
-        gemini_search_model: document.getElementById("gemini-search-model").value,
-        enable_search_grounding: document.getElementById("enable-search-grounding") ? document.getElementById("enable-search-grounding").checked : false,
-        groq_api_key: document.getElementById("groq-api-key") ? document.getElementById("groq-api-key").value : "",
-        groq_model: document.getElementById("groq-model") ? document.getElementById("groq-model").value : "llama-3.3-70b-versatile"
+        ...(typeof collectAiConfigPayload === "function" ? collectAiConfigPayload() : {})
     };
 
     try {

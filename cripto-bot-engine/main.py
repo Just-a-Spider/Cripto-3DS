@@ -13,6 +13,7 @@ from engine.risk_manager import risk_manager
 from engine.db import load_config_item
 
 from engine.api_routes import router as api_router
+from engine.ai_routes import router as ai_router
 from engine.telemetry import start_3ds_tcp_server
 from engine.watchdogs import trade_timeout_watchdog, cost_basis_watchdog
 from engine.binance_client import start_binance_websocket
@@ -87,8 +88,14 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("No authorized Discord user IDs configured. Discord bot commands will be locked until an ID is set in .env or Web Companion.")
 
+    state.ai_provider = saved_cfg.get("ai_provider", os.getenv("AI_PROVIDER", "google"))
+    state.ai_model = saved_cfg.get("ai_model", os.getenv("AI_MODEL", "gemini-3.1-flash"))
+    state.ai_base_url = saved_cfg.get("ai_base_url", os.getenv("AI_BASE_URL", ""))
+    state.ai_fallback_provider = saved_cfg.get("ai_fallback_provider", os.getenv("AI_FALLBACK_PROVIDER", "groq"))
+    state.ai_fallback_model = saved_cfg.get("ai_fallback_model", os.getenv("AI_FALLBACK_MODEL", "llama-3.3-70b-versatile"))
+
     state.gemini_api_key = saved_cfg.get("gemini_api_key", os.getenv("GEMINI_API_KEY", ""))
-    state.gemini_model = saved_cfg.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite"))
+    state.gemini_model = saved_cfg.get("gemini_model", os.getenv("GEMINI_MODEL", "gemini-3.1-flash"))
     state.gemini_search_model = saved_cfg.get("gemini_search_model", os.getenv("GEMINI_SEARCH_MODEL", "gemini-3.1-flash-lite"))
     
     raw_grounding = saved_cfg.get("enable_search_grounding", os.getenv("ENABLE_SEARCH_GROUNDING", "false"))
@@ -96,6 +103,32 @@ async def lifespan(app: FastAPI):
 
     state.groq_api_key = saved_cfg.get("groq_api_key", os.getenv("GROQ_API_KEY", ""))
     state.groq_model = saved_cfg.get("groq_model", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
+
+    # Decrypt AI Provider keys if encrypted
+    enc_ai_key = saved_cfg.get("ai_api_key", "")
+    if enc_ai_key:
+        try:
+            cipher = get_cipher(state.auth_pin)
+            state.ai_api_key = cipher.decrypt(enc_ai_key.encode()).decode()
+        except Exception:
+            state.ai_api_key = os.getenv("AI_API_KEY", "")
+    else:
+        state.ai_api_key = os.getenv("AI_API_KEY", "")
+
+    enc_fb_key = saved_cfg.get("ai_fallback_api_key", "")
+    if enc_fb_key:
+        try:
+            cipher = get_cipher(state.auth_pin)
+            state.ai_fallback_api_key = cipher.decrypt(enc_fb_key.encode()).decode()
+        except Exception:
+            state.ai_fallback_api_key = os.getenv("AI_FALLBACK_API_KEY", "")
+    else:
+        state.ai_fallback_api_key = os.getenv("AI_FALLBACK_API_KEY", "")
+
+    if not state.ai_api_key and state.ai_provider == "google" and state.gemini_api_key:
+        state.ai_api_key = state.gemini_api_key
+    if not state.ai_fallback_api_key and state.ai_fallback_provider == "groq" and state.groq_api_key:
+        state.ai_fallback_api_key = state.groq_api_key
 
     raw_ai_scout = saved_cfg.get("ai_scout_enabled", os.getenv("AI_SCOUT_ENABLED", "true"))
     state.ai_scout_enabled = str(raw_ai_scout).lower() in ("true", "1", "yes")
@@ -179,6 +212,7 @@ if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 app.include_router(api_router)
+app.include_router(ai_router)
 
 if __name__ == "__main__":
     if os.environ.get("HEADLESS", "false").lower() == "true":

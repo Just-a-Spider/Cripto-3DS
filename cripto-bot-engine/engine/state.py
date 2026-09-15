@@ -74,8 +74,15 @@ class ConfigModel(BaseModel):
     discord_bot_token: str = ""
     discord_channel_id: str = ""
     allowed_discord_user_ids: Union[str, List[str], List[int]] = ""
+    ai_provider: str = "google"
+    ai_model: str = "gemini-3.1-flash"
+    ai_api_key: str = ""
+    ai_base_url: str = ""
+    ai_fallback_provider: str = "groq"
+    ai_fallback_model: str = "llama-3.3-70b-versatile"
+    ai_fallback_api_key: str = ""
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_model: str = "gemini-3.1-flash"
     gemini_search_model: str = "gemini-3.1-flash-lite"
     enable_search_grounding: bool = False
     groq_api_key: str = ""
@@ -117,16 +124,39 @@ class BotState:
         self.discord_webhook_url: str = ""
         self.discord_bot_token: str = ""
         self.discord_channel_id: str = ""
+        self.ai_provider: str = "google"
+        self.ai_model: str = "gemini-3.1-flash"
+        self.ai_api_key: str = ""
+        self.ai_base_url: str = ""
+        self.ai_fallback_provider: str = "groq"
+        self.ai_fallback_model: str = "llama-3.3-70b-versatile"
+        self.ai_fallback_api_key: str = ""
         self.gemini_api_key: str = ""
         self.gemini_model: str = "gemini-3.1-flash-lite"
         self.gemini_search_model: str = "gemini-3.1-flash-lite"
         self.enable_search_grounding: bool = False
         self.groq_api_key: str = ""
         self.groq_model: str = "llama-3.3-70b-versatile"
-        self.available_gemini_models: List[str] = ["gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3-flash-preview"]
+        self.available_gemini_models: List[str] = ["gemini-3.1-flash", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3-flash-preview"]
         self.ai_scout_enabled: bool = True
         self.ai_scout_interval_hours: float = 2.0
         self.ai_scout_min_confidence: float = 0.85
+
+    @property
+    def has_ai(self) -> bool:
+        return bool(self.ai_api_key or self.gemini_api_key or self.ai_provider == "ollama")
+
+    @property
+    def has_ai_fallback(self) -> bool:
+        return bool(self.ai_fallback_api_key or self.groq_api_key)
+
+    @property
+    def has_gemini(self) -> bool:
+        return bool(self.gemini_api_key or (self.ai_provider == "google" and self.ai_api_key))
+
+    @property
+    def has_groq(self) -> bool:
+        return bool(self.groq_api_key or (self.ai_fallback_provider == "groq" and self.ai_fallback_api_key))
 
     def is_discord_user_authorized(self, user_id: Any) -> bool:
         if not user_id or not self.allowed_discord_user_ids:
@@ -234,11 +264,18 @@ class BotState:
             "discord_webhook_url": self.discord_webhook_url,
             "has_discord_bot": bool(self.discord_bot_token and self.discord_channel_id),
             "discord_channel_id": self.discord_channel_id,
+            "ai_provider": self.ai_provider,
+            "ai_model": self.ai_model,
+            "has_ai": self.has_ai,
+            "ai_base_url": self.ai_base_url,
+            "ai_fallback_provider": self.ai_fallback_provider,
+            "ai_fallback_model": self.ai_fallback_model,
+            "has_ai_fallback": self.has_ai_fallback,
             "gemini_model": self.gemini_model,
             "gemini_search_model": self.gemini_search_model,
             "enable_search_grounding": self.enable_search_grounding,
-            "has_gemini": bool(self.gemini_api_key),
-            "has_groq": bool(self.groq_api_key),
+            "has_gemini": self.has_gemini,
+            "has_groq": self.has_groq,
             "groq_model": self.groq_model,
             "has_pin": bool(self.auth_pin),
             "allowed_discord_user_ids": list(self.allowed_discord_user_ids),

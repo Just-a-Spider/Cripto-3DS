@@ -375,41 +375,63 @@
 
             <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
 
-            <h3>[AI] Google AI Studio & Autonomous Scout</h3>
-            <p style="font-size: 0.85rem; color: var(--comment); margin-bottom: 12px;">Get a free API key at <a href="https://aistudio.google.com" target="_blank" style="color: var(--accent);">aistudio.google.com</a> (100% Free Tier, 0 maintenance cost).</p>
+            <h3>[AI] Universal Provider & Intelligence (LangChain)</h3>
+            <p style="font-size: 0.85rem; color: var(--comment); margin-bottom: 12px;">Powered by LangChain. Choose any cloud provider (Google, OpenAI, Anthropic, Groq, DeepSeek) or local offline model (Ollama).</p>
             <div class="grid">
-                <div style="grid-column: 1 / span 2;">
-                    <label>Google AI Studio API Key:</label>
-                    <input type="password" id="gemini-api-key" placeholder="AIzaSy... (Saved)">
-                </div>
                 <div>
-                    <label>Primary Inference Model:</label>
-                    <div style="display: flex; gap: 8px;">
-                        <select id="gemini-model" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
-                            <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fastest / Recommended / 500 RPD)</option>
-                            <option value="gemini-flash-lite-latest">gemini-flash-lite-latest</option>
-                            <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
-                            <option value="gemini-3.5-flash">gemini-3.5-flash</option>
-                            <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
-                        </select>
-                        <button type="button" class="btn btn-blue" onclick="fetchGeminiModels()" style="padding: 6px 10px; font-size: 0.8rem; white-space: nowrap; flex:0 0 auto; min-width:auto;">REFETCH</button>
-                    </div>
-                </div>
-                <div>
-                    <label>Search Grounding Model (Web Search):</label>
-                    <select id="gemini-search-model" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
-                        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fast / 500 RPD)</option>
-                        <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
-                        <option value="gemini-3.5-flash">gemini-3.5-flash</option>
+                    <label>AI Provider:</label>
+                    <select id="ai-provider" onchange="onAiProviderChanged()" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
+                        <option value="google">Google Gemini (Default / Free Tier)</option>
+                        <option value="openai">OpenAI (GPT-4o, GPT-4o-mini)</option>
+                        <option value="anthropic">Anthropic Claude (Sonnet, Haiku)</option>
+                        <option value="groq">Groq Cloud (Llama-3.3-70b Free Tier)</option>
+                        <option value="deepseek">DeepSeek (deepseek-chat)</option>
+                        <option value="ollama">Ollama (Local Offline Self-Hosted)</option>
+                        <option value="openrouter">OpenRouter (100+ Models)</option>
+                        <option value="custom">Custom (OpenAI-Compatible Endpoint)</option>
                     </select>
                 </div>
                 <div>
-                    <label>Google Search Grounding:</label>
-                    <div style="display: flex; align-items: center; gap: 8px; margin-top: 5px;">
-                        <input type="checkbox" id="enable-search-grounding" style="width: 22px; height: 22px;">
-                        <span style="font-size: 0.8rem; color: var(--yellow);">[NOTE] Paid tier only. Keep OFF on free tier (prevents 429).</span>
-                    </div>
+                    <label>Inference Model:</label>
+                    <select id="ai-model" onchange="onAiModelChanged()" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
+                        <option value="gemini-3.1-flash">gemini-3.1-flash (Recommended / Fast)</option>
+                        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+                        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                    </select>
+                    <input type="text" id="ai-custom-model-input" placeholder="Enter custom model identifier..." style="display: none; width: 100%; margin-top: 6px; padding: 8px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
                 </div>
+                <div style="grid-column: 1 / span 2;">
+                    <label id="ai-key-label">API Key:</label>
+                    <input type="password" id="ai-api-key" placeholder="Enter API Key (saved securely with PIN)">
+                </div>
+                <div id="ai-base-url-container" style="display: none; grid-column: 1 / span 2;">
+                    <label>Base URL (for Ollama, DeepSeek, OpenRouter, Custom):</label>
+                    <input type="text" id="ai-base-url" placeholder="http://localhost:11434/v1">
+                </div>
+
+                <div style="grid-column: 1 / span 2; display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
+                    <button type="button" id="btn-test-ai" class="btn btn-blue" onclick="testAiConnection()" style="padding: 8px 14px; font-size: 0.85rem;">TEST AI CONNECTION</button>
+                    <div id="ai-test-status" style="font-size: 0.85rem;"></div>
+                    <button type="button" class="btn btn-red" onclick="clearAiSessionMemory()" style="padding: 8px 14px; font-size: 0.85rem;">CLEAR CHAT MEMORY</button>
+                </div>
+
+                <div>
+                    <label>Fallback Provider (Zero-Downtime Backup):</label>
+                    <select id="ai-fallback-provider" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
+                        <option value="groq">Groq Cloud (Llama-3.3-70b Backup)</option>
+                        <option value="google">Google Gemini Backup</option>
+                        <option value="openai">OpenAI Backup</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Fallback Model:</label>
+                    <input type="text" id="ai-fallback-model" value="llama-3.3-70b-versatile">
+                </div>
+                <div style="grid-column: 1 / span 2;">
+                    <label>Fallback API Key:</label>
+                    <input type="password" id="ai-fallback-key" placeholder="Fallback Provider Key...">
+                </div>
+
                 <div>
                     <label>Enable Autonomous AI Scout (Every 2h):</label>
                     <input type="checkbox" id="ai-scout-enabled" style="width: 22px; height: 22px; margin-top: 8px;" checked>
@@ -422,21 +444,13 @@
                     <label>AI Scout Min Confidence (0.85 = 85%):</label>
                     <input type="number" id="ai-scout-confidence" value="0.85" step="0.05" min="0.5" max="1.0">
                 </div>
-            </div>
 
-            <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
-
-            <h3>[FALLBACK] Groq Cloud Fallback (Secondary Free LLM)</h3>
-            <p style="font-size: 0.85rem; color: var(--comment); margin-bottom: 12px;">Get a free API key at <a href="https://console.groq.com" target="_blank" style="color: var(--accent);">console.groq.com</a> (14,400 RPD free tier backup if Gemini is overloaded).</p>
-            <div class="grid">
-                <div>
-                    <label>Groq Cloud API Key:</label>
-                    <input type="password" id="groq-api-key" placeholder="gsk_... (Saved)">
-                </div>
-                <div>
-                    <label>Groq Model:</label>
-                    <input type="text" id="groq-model" value="llama-3.3-70b-versatile">
-                </div>
+                <!-- Hidden inputs for backward compatibility -->
+                <input type="hidden" id="gemini-api-key" value="">
+                <input type="hidden" id="gemini-search-model" value="gemini-3.1-flash-lite">
+                <input type="hidden" id="enable-search-grounding" value="false">
+                <input type="hidden" id="groq-api-key" value="">
+                <input type="hidden" id="groq-model" value="llama-3.3-70b-versatile">
             </div>
             
             <div style="margin-top: 25px; text-align: center;">
@@ -448,6 +462,7 @@
     </div>
     <script src="/static/js/app.js"></script>
     <script src="/static/js/trading.js"></script>
+    <script src="/static/js/ai_settings.js"></script>
     <script src="/static/js/settings.js"></script>
 </body>
 </html>

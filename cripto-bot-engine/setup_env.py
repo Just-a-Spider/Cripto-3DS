@@ -20,9 +20,16 @@ def parse_args(args=None):
     parser.add_argument("--testnet", dest="testnet", choices=["true", "false", "True", "False"], default=None, help="Binance Testnet mode (true/false)")
     parser.add_argument("--discord-token", dest="discord_token", default=None, help="Discord Bot Token")
     parser.add_argument("--discord-channel", dest="discord_channel", default=None, help="Discord Channel ID")
-    parser.add_argument("--gemini-key", dest="gemini_key", default=None, help="Google Gemini API Key")
-    parser.add_argument("--gemini-model", dest="gemini_model", default="gemini-3.1-flash-lite", help="Gemini Model")
-    parser.add_argument("--groq-key", dest="groq_key", default=None, help="Groq Cloud API Key (optional free secondary LLM)")
+    parser.add_argument("--ai-provider", dest="ai_provider", default="google", help="AI Provider (google, openai, anthropic, groq, deepseek, ollama, openrouter, custom)")
+    parser.add_argument("--ai-model", dest="ai_model", default="gemini-3.1-flash", help="Primary AI Model")
+    parser.add_argument("--ai-key", dest="ai_key", default=None, help="Primary AI Provider API Key")
+    parser.add_argument("--ai-base-url", dest="ai_base_url", default="", help="Custom Base URL for Ollama / Custom endpoints")
+    parser.add_argument("--ai-fallback-provider", dest="ai_fallback_provider", default="groq", help="Fallback AI Provider")
+    parser.add_argument("--ai-fallback-model", dest="ai_fallback_model", default="llama-3.3-70b-versatile", help="Fallback AI Model")
+    parser.add_argument("--ai-fallback-key", dest="ai_fallback_key", default=None, help="Fallback AI Provider API Key")
+    parser.add_argument("--gemini-key", dest="gemini_key", default=None, help="Google Gemini API Key (legacy alias)")
+    parser.add_argument("--gemini-model", dest="gemini_model", default=None, help="Gemini Model (legacy alias)")
+    parser.add_argument("--groq-key", dest="groq_key", default=None, help="Groq Cloud API Key (legacy alias)")
     parser.add_argument("--env-path", dest="env_path", default=None, help="Custom destination path for .env file")
     parser.add_argument("--non-interactive", dest="non_interactive", action="store_true", help="Do not prompt interactively; use defaults or flags")
     return parser.parse_args(args)
@@ -115,28 +122,45 @@ def setup_environment(cli_args=None):
     else:
         discord_channel = existing_values.get("DISCORD_CHANNEL_ID", "")
 
-    # Gemini Key
-    if cli_args.gemini_key is not None:
-        gemini_key = cli_args.gemini_key.strip()
+    # AI Provider & Models
+    ai_provider = cli_args.ai_provider.strip() if cli_args.ai_provider else existing_values.get("AI_PROVIDER", "google")
+    
+    # Primary Key
+    if cli_args.ai_key is not None:
+        ai_key = cli_args.ai_key.strip()
+    elif cli_args.gemini_key is not None and ai_provider == "google":
+        ai_key = cli_args.gemini_key.strip()
     elif is_interactive:
-        current = existing_values.get("GEMINI_API_KEY", "")
-        gemini_key = prompt_val("Gemini API Key (free tier at aistudio.google.com)", current)
+        current = existing_values.get("AI_API_KEY", existing_values.get("GEMINI_API_KEY", ""))
+        ai_key = prompt_val(f"AI Provider ({ai_provider}) API Key", current)
     else:
-        gemini_key = existing_values.get("GEMINI_API_KEY", "")
+        ai_key = existing_values.get("AI_API_KEY", existing_values.get("GEMINI_API_KEY", ""))
 
-    # Gemini Model
-    if cli_args.gemini_model is not None:
-        gemini_model = cli_args.gemini_model.strip()
+    # Primary Model
+    if cli_args.gemini_model is not None and ai_provider == "google":
+        ai_model = cli_args.gemini_model.strip()
+    elif cli_args.ai_model is not None:
+        ai_model = cli_args.ai_model.strip()
     else:
-        gemini_model = existing_values.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+        ai_model = existing_values.get("AI_MODEL", existing_values.get("GEMINI_MODEL", "gemini-3.1-flash"))
 
-    # Groq Key (optional)
-    if cli_args.groq_key is not None:
-        groq_key = cli_args.groq_key.strip()
+    ai_base_url = cli_args.ai_base_url.strip() if cli_args.ai_base_url is not None else existing_values.get("AI_BASE_URL", "")
+
+    # Fallback Provider & Key
+    ai_fallback_provider = cli_args.ai_fallback_provider.strip() if cli_args.ai_fallback_provider else existing_values.get("AI_FALLBACK_PROVIDER", "groq")
+    ai_fallback_model = cli_args.ai_fallback_model.strip() if cli_args.ai_fallback_model else existing_values.get("AI_FALLBACK_MODEL", existing_values.get("GROQ_MODEL", "llama-3.3-70b-versatile"))
+    if cli_args.ai_fallback_key is not None:
+        ai_fallback_key = cli_args.ai_fallback_key.strip()
+    elif cli_args.groq_key is not None:
+        ai_fallback_key = cli_args.groq_key.strip()
     else:
-        groq_key = existing_values.get("GROQ_API_KEY", "")
+        ai_fallback_key = existing_values.get("AI_FALLBACK_API_KEY", existing_values.get("GROQ_API_KEY", ""))
 
-    groq_model = existing_values.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+    # Legacy variables for compatibility
+    gemini_key = ai_key if ai_provider == "google" else existing_values.get("GEMINI_API_KEY", "")
+    gemini_model = ai_model if ai_provider == "google" else existing_values.get("GEMINI_MODEL", "gemini-3.1-flash")
+    groq_key = ai_fallback_key if ai_fallback_provider == "groq" else existing_values.get("GROQ_API_KEY", "")
+    groq_model = ai_fallback_model if ai_fallback_provider == "groq" else existing_values.get("GROQ_MODEL", "llama-3.3-70b-versatile")
     enable_grounding = existing_values.get("ENABLE_SEARCH_GROUNDING", "false")
 
     server_port = existing_values.get("SERVER_3DS_PORT", "7343")
@@ -161,12 +185,19 @@ DISCORD_BOT_TOKEN={discord_token}
 DISCORD_CHANNEL_ID={discord_channel}
 DISCORD_WEBHOOK_URL={existing_values.get('DISCORD_WEBHOOK_URL', '')}
 
-# --- Google AI Studio (Gemini Free Tier) ---
+# --- Universal AI Provider (LangChain Engine) ---
+AI_PROVIDER={ai_provider}
+AI_MODEL={ai_model}
+AI_API_KEY={ai_key}
+AI_BASE_URL={ai_base_url}
+AI_FALLBACK_PROVIDER={ai_fallback_provider}
+AI_FALLBACK_MODEL={ai_fallback_model}
+AI_FALLBACK_API_KEY={ai_fallback_key}
+
+# --- Backward Compatible AI Variables ---
 GEMINI_API_KEY={gemini_key}
 GEMINI_MODEL={gemini_model}
 ENABLE_SEARCH_GROUNDING={enable_grounding}
-
-# --- Secondary Free LLM Backup (Optional Groq Cloud) ---
 GROQ_API_KEY={groq_key}
 GROQ_MODEL={groq_model}
 

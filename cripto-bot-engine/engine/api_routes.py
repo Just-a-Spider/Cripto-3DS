@@ -144,14 +144,52 @@ async def update_config(cfg: ConfigModel):
         state.discord_channel_id = saved_cfg.get("discord_channel_id", state.discord_channel_id)
         cfg_dict["discord_channel_id"] = state.discord_channel_id
 
+    cipher = get_cipher(state.auth_pin)
+
+    # Universal AI Provider Configuration
+    if getattr(cfg, "ai_provider", None):
+        state.ai_provider = cfg.ai_provider.strip().lower()
+    cfg_dict["ai_provider"] = state.ai_provider
+
+    if getattr(cfg, "ai_model", None):
+        state.ai_model = cfg.ai_model.strip()
+    cfg_dict["ai_model"] = state.ai_model
+
+    if getattr(cfg, "ai_base_url", None) is not None:
+        state.ai_base_url = cfg.ai_base_url.strip()
+    cfg_dict["ai_base_url"] = state.ai_base_url
+
+    if getattr(cfg, "ai_fallback_provider", None):
+        state.ai_fallback_provider = cfg.ai_fallback_provider.strip().lower()
+    cfg_dict["ai_fallback_provider"] = state.ai_fallback_provider
+
+    if getattr(cfg, "ai_fallback_model", None):
+        state.ai_fallback_model = cfg.ai_fallback_model.strip()
+    cfg_dict["ai_fallback_model"] = state.ai_fallback_model
+
+    if getattr(cfg, "ai_api_key", None):
+        state.ai_api_key = cfg.ai_api_key.strip()
+        cfg_dict["ai_api_key"] = cipher.encrypt(state.ai_api_key.encode()).decode()
+    elif "ai_api_key" in saved_cfg:
+        cfg_dict["ai_api_key"] = saved_cfg["ai_api_key"]
+
+    if getattr(cfg, "ai_fallback_api_key", None):
+        state.ai_fallback_api_key = cfg.ai_fallback_api_key.strip()
+        cfg_dict["ai_fallback_api_key"] = cipher.encrypt(state.ai_fallback_api_key.encode()).decode()
+    elif "ai_fallback_api_key" in saved_cfg:
+        cfg_dict["ai_fallback_api_key"] = saved_cfg["ai_fallback_api_key"]
+
+    # Legacy variables
     if cfg.gemini_api_key:
         state.gemini_api_key = cfg.gemini_api_key.strip()
         cfg_dict["gemini_api_key"] = state.gemini_api_key
+        if state.ai_provider == "google" and not getattr(cfg, "ai_api_key", None):
+            state.ai_api_key = state.gemini_api_key
     else:
         state.gemini_api_key = saved_cfg.get("gemini_api_key", state.gemini_api_key)
         cfg_dict["gemini_api_key"] = state.gemini_api_key
 
-    state.gemini_model = cfg.gemini_model.strip() if cfg.gemini_model else "gemini-3.1-flash-lite"
+    state.gemini_model = cfg.gemini_model.strip() if cfg.gemini_model else "gemini-3.1-flash"
     cfg_dict["gemini_model"] = state.gemini_model
 
     if getattr(cfg, "gemini_search_model", None):
@@ -164,6 +202,8 @@ async def update_config(cfg: ConfigModel):
     if getattr(cfg, "groq_api_key", None):
         state.groq_api_key = cfg.groq_api_key.strip()
         cfg_dict["groq_api_key"] = state.groq_api_key
+        if state.ai_fallback_provider == "groq" and not getattr(cfg, "ai_fallback_api_key", None):
+            state.ai_fallback_api_key = state.groq_api_key
     else:
         state.groq_api_key = saved_cfg.get("groq_api_key", state.groq_api_key)
         cfg_dict["groq_api_key"] = state.groq_api_key
@@ -273,7 +313,8 @@ async def test_discord_connection():
 @router.get("/api/gemini/models", dependencies=[Depends(verify_pin)])
 async def get_gemini_models():
     from engine.ai_analyst import fetch_available_gemini_models
-    models = await fetch_available_gemini_models(state.gemini_api_key)
+    key = getattr(state, "ai_api_key", "") or getattr(state, "gemini_api_key", "")
+    models = await fetch_available_gemini_models(key)
     if models:
         state.available_gemini_models = models
     return JSONResponse({"models": state.available_gemini_models})
