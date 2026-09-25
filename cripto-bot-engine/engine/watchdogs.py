@@ -12,8 +12,17 @@ from engine.ws_manager import broadcast_state
 
 
 async def trade_timeout_watchdog():
+    last_spend_refresh = 0.0
     while True:
         await asyncio.sleep(1)
+        now = time.time()
+        if (now - last_spend_refresh) >= 60.0:
+            last_spend_refresh = now
+            try:
+                await risk_manager.refresh_daily_spend(state.testnet, force=True)
+            except Exception as e:
+                logger.warning(f"Could not refresh rolling daily spend: {e}")
+
         if state.pending_trades:
             now = time.time()
             expired_ids = []
@@ -146,6 +155,7 @@ async def ai_opportunity_scout_watchdog():
                         action = "SELL" if "PROFIT" in stype.upper() or "EXIT" in stype.upper() else "BUY"
 
                         if action == "BUY":
+                            await risk_manager.refresh_daily_spend(state.testnet)
                             max_buy = risk_manager.get_max_allowed_buy(state.usdt_balance)
                             if max_buy < 5.0:
                                 logger.info(f"AI Scout: Skipping BUY {pair} - Insufficient USDT balance (${state.usdt_balance:.2f} < $5 min).")

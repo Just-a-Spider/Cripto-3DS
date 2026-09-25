@@ -17,6 +17,7 @@ function populateSettingsInputs(data) {
         document.getElementById("testnet-mode").checked = data.testnet;
     }
     if (data.strategies) {
+        if (data.strategies.dca_enabled !== undefined) document.getElementById("dca-enabled").checked = Boolean(data.strategies.dca_enabled);
         if (data.strategies.dca_interval !== undefined) document.getElementById("dca-interval").value = data.strategies.dca_interval;
         if (data.strategies.rsi_threshold !== undefined) document.getElementById("rsi-threshold").value = data.strategies.rsi_threshold;
         if (data.strategies.tp_percent !== undefined) document.getElementById("tp-percent").value = data.strategies.tp_percent;
@@ -118,6 +119,7 @@ async function saveConfig() {
         secret_key: document.getElementById("secret-key").value,
         favorite_pairs: currentPairs.join(","),
         testnet: document.getElementById("testnet-mode").checked,
+        dca_enabled: document.getElementById("dca-enabled").checked,
         dca_interval: parseInt(document.getElementById("dca-interval").value) || 3600,
         rsi_threshold: parseFloat(document.getElementById("rsi-threshold").value) || 30.0,
         tp_percent: parseFloat(document.getElementById("tp-percent").value) || 5.0,

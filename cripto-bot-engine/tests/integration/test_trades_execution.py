@@ -368,12 +368,29 @@ async def test_rolling_24h_spend_calculation():
     await log_trade("BTCUSDT", "SELL", 80.0, 65000.0, "EXECUTED", "ORD_RECENT_SELL", is_testnet=True, timestamp=now - 3600)
     # 4. FAILED BUY 1 hour ago: $50 -> must NOT count
     await log_trade("BTCUSDT", "BUY", 50.0, 60000.0, "FAILED: Test", "ORD_FAILED_BUY", is_testnet=True, timestamp=now - 3600)
+    # 5. BLOCKED BUY 1 hour ago: $50 -> must NOT count
+    await log_trade("BTCUSDT", "BUY", 50.0, 60000.0, "BLOCKED: Test Limit", "ORD_BLOCKED_BUY", is_testnet=True, timestamp=now - 3600)
+    # 6. REJECTED BUY 1 hour ago: $50 -> must NOT count
+    await log_trade("BTCUSDT", "BUY", 50.0, 60000.0, "REJECTED", "ORD_REJECTED_BUY", is_testnet=True, timestamp=now - 3600)
+    # 7. EXPIRED_TIMEOUT BUY 1 hour ago: $50 -> must NOT count
+    await log_trade("BTCUSDT", "BUY", 50.0, 60000.0, "EXPIRED_TIMEOUT", "ORD_TIMEOUT_BUY", is_testnet=True, timestamp=now - 3600)
 
     spend_24h = await get_rolling_daily_spend(is_testnet=True)
-    assert spend_24h >= 40.0
+    assert spend_24h == 40.0
 
-    await risk_manager.refresh_daily_spend(is_testnet=True)
-    assert risk_manager.daily_spent == spend_24h
+    # Test force refresh resets in-memory ratchet accurately to 40.0
+    risk_manager.daily_spent_usdt = 999.0
+    await risk_manager.refresh_daily_spend(is_testnet=True, force=True)
+    assert risk_manager.daily_spent == 40.0
+
+    # Verify TTL caching prevents redundant DB hits unless force=True
+    risk_manager.daily_spent_usdt = 123.0
+    cached = await risk_manager.refresh_daily_spend(is_testnet=True, force=False)
+    assert cached == 123.0  # Returned cached value within TTL
+
+    # Force bypasses cache
+    refreshed = await risk_manager.refresh_daily_spend(is_testnet=True, force=True)
+    assert refreshed == 40.0
 
     # Verify record_spend only increments for BUY
     prev_spent = risk_manager.daily_spent

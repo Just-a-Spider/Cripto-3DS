@@ -1,6 +1,7 @@
 import asyncio
 import json
 
+from engine.db import load_config_item, save_config_item
 from engine.logger import logger
 from engine.shared import save_strategy_state
 from engine.state import state
@@ -8,9 +9,9 @@ from engine.trades import decide_trade
 from engine.ws_manager import broadcast_state
 
 
-async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
+async def start_3ds_tcp_server(host: str = "0.0.0.0", port: int = 7343):
     async def handle_3ds_client(reader, writer):
-        addr = writer.get_extra_info('peername')
+        addr = writer.get_extra_info("peername")
         logger.info(f"3DS Client connected from {addr}")
         client_auth = {"authenticated": False}
         auth_event = asyncio.Event()
@@ -21,7 +22,7 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                 if not line:
                     break
 
-                cmd = line.decode('utf-8', errors='ignore').strip()
+                cmd = line.decode("utf-8", errors="ignore").strip()
                 if not cmd:
                     continue
 
@@ -90,6 +91,9 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                 elif action == "TOGGLE_DCA":
                     state.dca_strategy.enabled = not state.dca_strategy.enabled
                     logger.info(f"3DS Action executed: TOGGLE_DCA -> dca_enabled={state.dca_strategy.enabled}")
+                    saved_cfg = await load_config_item("risk_config") or {}
+                    saved_cfg["dca_enabled"] = state.dca_strategy.enabled
+                    await save_config_item("risk_config", saved_cfg)
                     await broadcast_state()
 
                 elif action == "FORCE_EVALUATE":
@@ -104,9 +108,9 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                     try:
                         override_amount = float(param)
                         if state.pending_trade and override_amount > 0:
-                            state.pending_trade['amount_usdt'] = override_amount
-                            if state.pending_trade['price'] > 0:
-                                state.pending_trade['amount_asset'] = override_amount / state.pending_trade['price']
+                            state.pending_trade["amount_usdt"] = override_amount
+                            if state.pending_trade["price"] > 0:
+                                state.pending_trade["amount_asset"] = override_amount / state.pending_trade["price"]
                             logger.info(f"3DS Action executed: SET_OVERRIDE -> ${override_amount:.2f} USDT")
                             await broadcast_state()
                     except ValueError:
@@ -159,7 +163,6 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
         async def telemetry_streamer():
             await auth_event.wait()
             while True:
-
                 if state.favorite_pairs:
                     state.current_pair_idx = (state.current_pair_idx + 1) % len(state.favorite_pairs)
                     curr_pair = state.favorite_pairs[state.current_pair_idx]
@@ -200,7 +203,7 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                     "trade_amount_usdt": 0.0,
                     "ai_risk": "",
                     "ai_verdict": "",
-                    "top_assets": top_assets_str
+                    "top_assets": top_assets_str,
                 }
 
                 if state.pending_trade:
@@ -220,7 +223,7 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                     payload["ai_verdict"] = state.pending_trade.get("ai_verdict", "")
 
                 msg = json.dumps(payload) + "\n"
-                writer.write(msg.encode('utf-8'))
+                writer.write(msg.encode("utf-8"))
                 await writer.drain()
                 await asyncio.sleep(2)
 
@@ -228,10 +231,7 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
         streamer_task = asyncio.create_task(telemetry_streamer())
 
         try:
-            done, pending = await asyncio.wait(
-                [reader_task, streamer_task],
-                return_when=asyncio.FIRST_COMPLETED
-            )
+            done, pending = await asyncio.wait([reader_task, streamer_task], return_when=asyncio.FIRST_COMPLETED)
             for task in pending:
                 task.cancel()
         except Exception as e:

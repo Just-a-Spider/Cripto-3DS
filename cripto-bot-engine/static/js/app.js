@@ -86,6 +86,13 @@ function updateUI(data) {
     const statusEl = document.getElementById("bot-status");
     statusEl.innerText = data.is_active ? "ACTIVE" : "PAUSED";
     statusEl.className = "badge " + (data.is_active ? "badge-active" : "badge-paused");
+
+    const dcaBadge = document.getElementById("dca-status-badge");
+    if (dcaBadge && data.strategies) {
+        const dcaOn = Boolean(data.strategies.dca_enabled);
+        dcaBadge.innerText = dcaOn ? "DCA: ON" : "DCA: OFF";
+        dcaBadge.className = "badge " + (dcaOn ? "badge-active" : "badge-paused");
+    }
     
     let listHtml = "";
     for (const pair of data.favorite_pairs) {

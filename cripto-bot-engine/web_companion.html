@@ -46,6 +46,7 @@
             
             <div class="controls-bar">
                 <span id="bot-status" class="badge badge-paused">PAUSED</span>
+                <span id="dca-status-badge" class="badge badge-paused" style="cursor: pointer;" onclick="toggleDcaViaBadge()" title="Click to Toggle DCA Strategy">DCA: OFF</span>
                 <button class="btn btn-green" onclick="toggleBot(true)">START</button>
                 <button class="btn btn-red" onclick="toggleBot(false)">PAUSE</button>
                 <button class="btn btn-yellow" onclick="triggerSimulatedTrade()">TEST BUY</button>
@@ -319,6 +320,9 @@
             <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
             
             <h3>Passive Strategy Rules</h3>
+            <div style="margin-bottom: 15px;">
+                <label><input type="checkbox" id="dca-enabled"> Enable DCA Strategy (Round-Robin)</label>
+            </div>
             <div class="grid">
                 <div>
                     <label>DCA Interval (Seconds):</label>

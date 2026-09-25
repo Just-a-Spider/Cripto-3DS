@@ -197,6 +197,7 @@ async def decide_trade(approved: bool, trade_id: int | None = None, pair: str | 
             logger.info(f"Trade APPROVED: {trade['action']} {trade['pair']} (ID: {tid})")
 
             # 1. Risk Manager validation
+            await risk_manager.refresh_daily_spend(state.testnet, force=True)
             valid, reason = risk_manager.validate_trade(trade['action'], trade['amount_usdt'], state.usdt_balance)
             if not valid:
                 logger.warning(f"Trade blocked by RiskManager: {reason}")
@@ -428,6 +429,7 @@ async def execute_manual_buy(asset: str, usdt_amount: float, pin: str) -> dict[s
         return {"status": "error", "message": "Minimum buy order value is $5.00 USDT."}
 
     # Validate against Risk Manager rules
+    await risk_manager.refresh_daily_spend(state.testnet, force=True)
     valid, reason = risk_manager.validate_trade("BUY", usdt_amount, state.usdt_balance)
     if not valid:
         return {"status": "error", "message": f"Risk Manager blocked trade: {reason}"}

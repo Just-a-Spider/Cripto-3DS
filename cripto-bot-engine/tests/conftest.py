@@ -19,6 +19,7 @@ async def reset_state(tmp_path, monkeypatch):
     test_db = str(tmp_path / "test_bot_data.db")
     import engine.db
     import engine.history_analyzer
+
     monkeypatch.setattr(engine.db, "DB_PATH", test_db)
     monkeypatch.setattr(engine.history_analyzer, "DB_PATH", test_db)
 
@@ -40,14 +41,27 @@ async def reset_state(tmp_path, monkeypatch):
     state.gemini_model = "gemini-3.1-flash-lite"
     state.gemini_search_model = "gemini-3.1-flash-lite"
     state.enable_search_grounding = False
+    state.binance_client = None
+    state.dca_strategy.enabled = False
+    state.dca_strategy.interval_sec = 3600
+
+    from engine.risk_manager import risk_manager
+
+    risk_manager.max_trade_usdt = 50.0
+    risk_manager.max_daily_spend_usdt = 200.0
+    risk_manager.min_usdt_reserve = 20.0
+    risk_manager.require_human_approval = True
+    risk_manager.daily_spent_usdt = 0.0
 
     yield test_db
+
 
 @pytest.fixture
 async def async_client():
     """Provides a configured async HTTP client connected to the FastAPI app."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
+
 
 @pytest.fixture
 def auth_headers():

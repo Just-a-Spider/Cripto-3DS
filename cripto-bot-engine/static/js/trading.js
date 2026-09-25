@@ -6,6 +6,18 @@ async function toggleBot(active) {
     await fetch(getApiBase() + "/api/bot/toggle?active=" + active, { method: "POST", headers: { "X-Auth-PIN": authPin } });
 }
 
+async function toggleDca(enabled = null) {
+    let url = getApiBase() + "/api/strategy/dca/toggle";
+    if (enabled !== null) {
+        url += "?enabled=" + enabled;
+    }
+    await fetch(url, { method: "POST", headers: { "X-Auth-PIN": authPin } });
+}
+
+async function toggleDcaViaBadge() {
+    await toggleDca();
+}
+
 async function decideTrade(approved) {
     const overrideInput = document.getElementById("override-trade-amount");
     let url = getApiBase() + "/api/trade/decide?approved=" + approved;

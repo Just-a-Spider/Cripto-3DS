@@ -20,12 +20,14 @@ from engine.ws_manager import broadcast_state, ws_manager
 
 router = APIRouter()
 
+
 def dump_pydantic_model(model: Any) -> dict[str, Any]:
     if hasattr(model, "model_dump") and callable(getattr(model, "model_dump")):
         return model.model_dump()
     if hasattr(model, "dict") and callable(getattr(model, "dict")):
         return model.dict()
     return vars(model)
+
 
 def verify_pin(request: Request, x_auth_pin: str = Header(None)):
     if not state.auth_pin:
@@ -35,12 +37,15 @@ def verify_pin(request: Request, x_auth_pin: str = Header(None)):
         logger.warning(f"Unauthorized API access attempt blocked from {client_host}")
         raise HTTPException(status_code=401, detail="Invalid PIN")
 
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_COMPANION_PATH = os.path.join(BASE_DIR, "web_companion.html")
+
 
 @router.get("/", response_class=HTMLResponse)
 async def get_index():
     return HTMLResponse("<h1>Engine is running.</h1>")
+
 
 @router.get("/web", response_class=HTMLResponse)
 async def get_web():
@@ -50,6 +55,7 @@ async def get_web():
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     return response
+
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, pin: str = None):
@@ -65,14 +71,17 @@ async def websocket_endpoint(websocket: WebSocket, pin: str = None):
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
 
+
 @router.get("/api/state", dependencies=[Depends(verify_pin)])
 async def get_state():
     return JSONResponse(state.to_dict())
+
 
 @router.get("/api/history", dependencies=[Depends(verify_pin)])
 async def get_history():
     history = await get_trade_history(30, state.testnet)
     return JSONResponse({"history": history})
+
 
 @router.post("/api/config", dependencies=[Depends(verify_pin)])
 async def update_config(cfg: ConfigModel):
@@ -86,6 +95,7 @@ async def update_config(cfg: ConfigModel):
     if cfg.favorite_pairs:
         state.favorite_pairs = [p.strip() for p in cfg.favorite_pairs.split(",") if p.strip()]
 
+    state.dca_strategy.enabled = bool(getattr(cfg, "dca_enabled", False))
     state.dca_strategy.interval_sec = cfg.dca_interval
     state.rsi_strategy.oversold_rsi = cfg.rsi_threshold
     state.tpsl_strategy.tp_percent = cfg.tp_percent
@@ -229,36 +239,40 @@ async def update_config(cfg: ConfigModel):
 
     if state.discord_bot_token and state.discord_channel_id:
         from engine.notifier import discord_bot_service
+
         asyncio.create_task(discord_bot_service.start(state.discord_bot_token, state.discord_channel_id))
 
     await broadcast_state()
     return {"status": "ok"}
 
+
 @router.get("/api/logs", dependencies=[Depends(verify_pin)])
 async def get_logs():
     return JSONResponse({"logs": list(recent_logs)})
 
+
 @router.get("/api/trades", dependencies=[Depends(verify_pin)])
 async def get_trades(limit: int = 100):
     from engine.db import get_pnl_summary, get_trade_history
+
     history = await get_trade_history(limit=limit, is_testnet=state.testnet)
     summary = await get_pnl_summary(is_testnet=state.testnet)
-    return JSONResponse({
-        "trades": history,
-        "summary": summary,
-        "asset_performance": state.asset_performance
-    })
+    return JSONResponse({"trades": history, "summary": summary, "asset_performance": state.asset_performance})
+
 
 @router.get("/api/trades/analysis", dependencies=[Depends(verify_pin)])
 async def get_trades_analysis():
     from engine.history_analyzer import analyze_and_reconcile_history
+
     if not state.asset_performance:
         state.asset_performance = await analyze_and_reconcile_history(is_testnet=state.testnet, update_db=False)
     return JSONResponse(state.asset_performance)
 
+
 @router.post("/api/trades/reconcile", dependencies=[Depends(verify_pin)])
 async def api_reconcile_trades():
     from engine.history_analyzer import analyze_and_reconcile_history
+
     analysis = await analyze_and_reconcile_history(is_testnet=state.testnet, update_db=True)
     state.asset_performance = analysis
     for p, pdata in analysis.get("assets", {}).items():
@@ -267,39 +281,47 @@ async def api_reconcile_trades():
     await broadcast_state()
     return JSONResponse({"status": "ok", "analysis": analysis})
 
+
 @router.get("/api/ai/portfolio_review", dependencies=[Depends(verify_pin)])
 async def api_get_portfolio_review():
     from engine.agentic_decision import generate_agentic_portfolio_review
+
     if not state.agentic_portfolio_review:
         state.agentic_portfolio_review = await generate_agentic_portfolio_review(
             state.asset_performance,
             state.to_dict(),
             api_key=state.ai_api_key or state.gemini_api_key,
-            model=state.ai_model or state.gemini_model
+            model=state.ai_model or state.gemini_model,
         )
     return JSONResponse(state.agentic_portfolio_review)
+
 
 @router.delete("/api/trades/clear", dependencies=[Depends(verify_pin)])
 async def clear_trades(only_rejected: bool = True):
     from engine.db import clear_trade_history
+
     deleted = await clear_trade_history(only_unexecuted=only_rejected, is_testnet=state.testnet)
     logger.info(f"Purged {deleted} trade records (only_rejected={only_rejected}).")
     await broadcast_state()
     return JSONResponse({"status": "ok", "deleted": deleted})
 
+
 @router.post("/api/trades/deduplicate", dependencies=[Depends(verify_pin)])
 async def api_deduplicate_trades():
     from engine.db import deduplicate_trade_history
+
     deleted = await deduplicate_trade_history(is_testnet=state.testnet)
     logger.info(f"Manual trade deduplication triggered: {deleted} duplicates removed.")
     await broadcast_state()
     return JSONResponse({"status": "ok", "pruned_duplicates": deleted})
+
 
 @router.post("/api/discord/test", dependencies=[Depends(verify_pin)])
 async def test_discord_connection():
     import discord
 
     from engine.notifier import HAS_DISCORD_PY, discord_bot_service
+
     if not HAS_DISCORD_PY:
         return JSONResponse({"status": "error", "message": "discord.py is not installed on this machine."})
 
@@ -319,7 +341,10 @@ async def test_discord_connection():
             except asyncio.TimeoutError:
                 pass
             if not discord_bot_service.is_ready:
-                err_detail = discord_bot_service.last_error or "Gateway handshake took longer than 10s. Check token validity or network."
+                err_detail = (
+                    discord_bot_service.last_error
+                    or "Gateway handshake took longer than 10s. Check token validity or network."
+                )
                 return JSONResponse({"status": "error", "message": f"Connection Timed Out: {err_detail}"})
 
         clean_channel_id = int(channel_id)
@@ -328,30 +353,37 @@ async def test_discord_connection():
             channel = await discord_bot_service.client.fetch_channel(clean_channel_id)
 
         if not channel:
-            return JSONResponse({"status": "error", "message": f"Channel ID {clean_channel_id} not found or Bot not invited to server."})
+            return JSONResponse(
+                {"status": "error", "message": f"Channel ID {clean_channel_id} not found or Bot not invited to server."}
+            )
 
         embed = discord.Embed(
             title="Cripto-3DS Discord Bot Connected",
             description="Discord bot communication test successful! Interactive buttons and slash commands are active.",
-            color=0x50fa7b
+            color=0x50FA7B,
         )
         embed.add_field(name="Server Time", value=time.strftime("%Y-%m-%d %H:%M:%S"), inline=True)
         embed.add_field(name="Engine Status", value="ACTIVE" if state.is_active else "PAUSED", inline=True)
         await channel.send(embed=embed)
         logger.info("Discord test message successfully sent to channel.")
-        return JSONResponse({"status": "ok", "message": f"Connected as {discord_bot_service.client.user}! Test message sent."})
+        return JSONResponse(
+            {"status": "ok", "message": f"Connected as {discord_bot_service.client.user}! Test message sent."}
+        )
     except Exception as e:
         logger.error(f"Discord test error: {type(e).__name__}: {e}")
         return JSONResponse({"status": "error", "message": f"{type(e).__name__}: {e}"})
 
+
 @router.get("/api/gemini/models", dependencies=[Depends(verify_pin)])
 async def get_gemini_models():
     from engine.ai_analyst import fetch_available_gemini_models
+
     key = getattr(state, "ai_api_key", "") or getattr(state, "gemini_api_key", "")
     models = await fetch_available_gemini_models(key)
     if models:
         state.available_gemini_models = models
     return JSONResponse({"models": state.available_gemini_models})
+
 
 @router.get("/api/symbols", dependencies=[Depends(verify_pin)])
 async def get_symbols():
@@ -359,11 +391,12 @@ async def get_symbols():
         async with aiohttp.ClientSession() as session:
             async with session.get("https://api.binance.com/api/v3/exchangeInfo") as resp:
                 info = await resp.json()
-                symbols = [s['symbol'] for s in info.get('symbols', []) if s['symbol'].endswith('USDT')]
+                symbols = [s["symbol"] for s in info.get("symbols", []) if s["symbol"].endswith("USDT")]
                 return JSONResponse({"symbols": sorted(symbols)})
     except Exception as e:
         logger.error(f"Error fetching symbols: {e}")
         return JSONResponse({"symbols": []})
+
 
 @router.post("/api/bot/toggle", dependencies=[Depends(verify_pin)])
 async def toggle_bot(active: bool):
@@ -372,6 +405,21 @@ async def toggle_bot(active: bool):
     await broadcast_state()
     return {"status": "ok", "is_active": state.is_active}
 
+
+@router.post("/api/strategy/dca/toggle", dependencies=[Depends(verify_pin)])
+async def toggle_dca(enabled: bool | None = None):
+    if enabled is None:
+        state.dca_strategy.enabled = not state.dca_strategy.enabled
+    else:
+        state.dca_strategy.enabled = enabled
+    saved_cfg = await load_config_item("risk_config") or {}
+    saved_cfg["dca_enabled"] = state.dca_strategy.enabled
+    await save_config_item("risk_config", saved_cfg)
+    logger.info(f"DCA strategy toggled via API: enabled={state.dca_strategy.enabled}")
+    await broadcast_state()
+    return {"status": "ok", "dca_enabled": state.dca_strategy.enabled}
+
+
 from engine.trades import decide_all_trades
 
 
@@ -379,10 +427,12 @@ from engine.trades import decide_all_trades
 async def api_decide_trade(approved: bool, trade_id: int = None, pair: str = None, override_usdt: float = None):
     return await decide_trade(approved=approved, trade_id=trade_id, pair=pair, override_usdt=override_usdt)
 
+
 @router.post("/api/trade/decide_all", dependencies=[Depends(verify_pin)])
 async def api_decide_all_trades(approved: bool):
     results = await decide_all_trades(approved=approved)
     return {"status": "ok", "results": results}
+
 
 @router.post("/api/trade/simulate", dependencies=[Depends(verify_pin)])
 async def simulate_trade(count: int = 1):
@@ -403,7 +453,7 @@ async def simulate_trade(count: int = 1):
             "price": curr_price,
             "reason": f"Simulated Test Signal ({p})",
             "created_at": now,
-            "timeout_sec": 600
+            "timeout_sec": 600,
         }
         state.add_pending_trade(t)
         staged.append(t)
@@ -411,6 +461,7 @@ async def simulate_trade(count: int = 1):
     logger.info(f"Simulated {len(staged)} trade decision(s) queued.")
 
     from engine.notifier import send_discord_notification
+
     cfg = await load_config_item("risk_config") or {}
     subject = f"Crypto Bot Alert: Simulated Signals ({len(staged)} Assets)"
     body = f"Simulated trade signals require approval: {', '.join(t['pair'] for t in staged)}"
@@ -418,6 +469,7 @@ async def simulate_trade(count: int = 1):
 
     await broadcast_state()
     return {"status": "ok", "pending_trades": staged, "pending_trade": state.pending_trade}
+
 
 @router.post("/api/trade/force")
 async def force_evaluate_endpoint(x_auth_pin: str = Header(None)):
@@ -429,6 +481,7 @@ async def force_evaluate_endpoint(x_auth_pin: str = Header(None)):
     await save_strategy_state()
     return {"status": "cooldowns_cleared"}
 
+
 from pydantic import BaseModel
 
 
@@ -437,58 +490,77 @@ class ManualSellRequest(BaseModel):
     percent: float = 100.0
     pin: str
 
+
 class ManualBuyRequest(BaseModel):
     asset: str
     usdt_amount: float
     pin: str
 
+
 @router.post("/api/trade/manual_sell")
 @router.post("/api/manual_sell")
 async def api_manual_sell(req: ManualSellRequest):
     from engine.trades import execute_manual_sell
+
     res = await execute_manual_sell(req.asset, req.percent, req.pin)
     if res.get("status") == "error":
         return JSONResponse(res, status_code=400)
     return JSONResponse(res)
 
+
 @router.post("/api/trade/manual_buy")
 @router.post("/api/manual_buy")
 async def api_manual_buy(req: ManualBuyRequest):
     from engine.trades import execute_manual_buy
+
     res = await execute_manual_buy(req.asset, req.usdt_amount, req.pin)
     if res.get("status") == "error":
         return JSONResponse(res, status_code=400)
     return JSONResponse(res)
 
+
 @router.post("/api/balance/sync", dependencies=[Depends(verify_pin)])
 async def api_sync_balance():
     from engine.trades import sync_binance_balances
+
     await sync_binance_balances()
     await broadcast_state()
     return {"status": "ok", "usdt_balance": state.usdt_balance, "portfolio": state.portfolio_balances}
 
+
 @router.get("/api/news", dependencies=[Depends(verify_pin)])
 async def get_news_insights():
     from engine.ai_analyst import summarize_news_insights
+
     data = await summarize_news_insights(state.gemini_api_key, state.gemini_model)
     return JSONResponse(data)
+
 
 @router.post("/api/sync/trades_2026", dependencies=[Depends(verify_pin)])
 async def api_sync_2026_trades():
     from engine.trades import sync_binance_2026_trades
+
     res = await sync_binance_2026_trades()
     return JSONResponse(res)
+
 
 @router.post("/api/test/run", dependencies=[Depends(verify_pin)])
 async def api_run_test_suite():
     import asyncio
     import sys
     import time
+
     start = time.time()
     proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-m", "pytest", "tests/test_engine.py", "-k", "not test_api_run_test_suite", "-v",
+        sys.executable,
+        "-m",
+        "pytest",
+        "tests/test_engine.py",
+        "-k",
+        "not test_api_run_test_suite",
+        "-v",
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+        stderr=asyncio.subprocess.PIPE,
     )
     stdout, stderr = await proc.communicate()
     duration = round(time.time() - start, 2)
@@ -499,6 +571,5 @@ async def api_run_test_suite():
         "exit_code": proc.returncode,
         "passed": passed,
         "duration": duration,
-        "log": output
+        "log": output,
     }
-

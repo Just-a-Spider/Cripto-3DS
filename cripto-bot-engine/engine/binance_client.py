@@ -64,6 +64,7 @@ async def listen_market_data(bm):
                                 sig = tpsl_sig
                                 max_buy = 0.0
                                 if not sig:
+                                    await risk_manager.refresh_daily_spend(state.testnet)
                                     max_buy = risk_manager.get_max_allowed_buy(state.usdt_balance)
                                     can_buy = max_buy >= 5.0
 

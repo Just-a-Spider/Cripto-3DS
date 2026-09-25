@@ -23,6 +23,7 @@ async def test_get_state_endpoint():
         assert "prices" in data
         assert "favorite_pairs" in data
 
+
 @pytest.mark.asyncio
 async def test_bot_toggle_active():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -35,6 +36,7 @@ async def test_bot_toggle_active():
         assert response.json()["is_active"] is True
         assert state.is_active is True
 
+
 def test_state_indicators():
     from engine.state import state
 
@@ -45,6 +47,7 @@ def test_state_indicators():
     assert "rsi" in data["indicators"]["BTCUSDT"]
     assert "pct_b" in data["indicators"]["BTCUSDT"]
     assert "trailing_enabled" in data["strategies"]
+
 
 @pytest.mark.asyncio
 async def test_get_trades_endpoint():
@@ -62,12 +65,14 @@ async def test_get_trades_endpoint():
         assert "summary" in data
         assert "total_pnl_usdt" in data["summary"]
 
+
 def test_auth_pin_redacted_from_state_to_dict():
     state.auth_pin = "sensitive_security_pin_9876"
     dump = state.to_dict()
     assert "auth_pin" not in dump
     assert "pin" not in dump
     assert dump.get("has_pin") is True
+
 
 def test_setup_env_script(tmp_path):
     import os
@@ -76,19 +81,31 @@ def test_setup_env_script(tmp_path):
     from setup_env import parse_args, setup_environment
 
     test_env = tmp_path / ".env.test"
-    args = parse_args([
-        "--env-path", str(test_env),
-        "--discord-id", "123456789012345678,987654321098765432",
-        "--pin", "4321",
-        "--binance-key", "test_key",
-        "--binance-secret", "test_sec",
-        "--testnet", "true",
-        "--discord-token", "bot_tok_123",
-        "--discord-channel", "ch_123",
-        "--gemini-key", "gem_key_123",
-        "--gemini-model", "gemini-3.1-flash-lite",
-        "--non-interactive"
-    ])
+    args = parse_args(
+        [
+            "--env-path",
+            str(test_env),
+            "--discord-id",
+            "123456789012345678,987654321098765432",
+            "--pin",
+            "4321",
+            "--binance-key",
+            "test_key",
+            "--binance-secret",
+            "test_sec",
+            "--testnet",
+            "true",
+            "--discord-token",
+            "bot_tok_123",
+            "--discord-channel",
+            "ch_123",
+            "--gemini-key",
+            "gem_key_123",
+            "--gemini-model",
+            "gemini-3.1-flash-lite",
+            "--non-interactive",
+        ]
+    )
 
     written_path = setup_environment(args)
     assert written_path.exists()
@@ -106,6 +123,7 @@ def test_setup_env_script(tmp_path):
     # Check 0600 file permissions (read/write only for owner)
     mode = stat.S_IMODE(os.stat(written_path).st_mode)
     assert mode == 0o600
+
 
 def test_api_config_discord_id_persistence():
     from fastapi.testclient import TestClient
@@ -148,7 +166,7 @@ def test_api_config_discord_id_persistence():
         "gemini_search_model": "gemini-3.5-flash",
         "ai_scout_enabled": True,
         "ai_scout_interval_hours": 2.0,
-        "ai_scout_min_confidence": 0.85
+        "ai_scout_min_confidence": 0.85,
     }
 
     try:
@@ -182,6 +200,7 @@ def test_api_config_discord_id_persistence():
     finally:
         state.allowed_discord_user_ids = orig_allowed
 
+
 def test_web_companion_cache_headers():
     from fastapi.testclient import TestClient
 
@@ -193,6 +212,7 @@ def test_web_companion_cache_headers():
     cache_control = res.headers.get("cache-control", "")
     assert "no-cache" in cache_control
     assert "no-store" in cache_control
+
 
 def test_web_companion_decoupled_static_assets():
     from fastapi.testclient import TestClient
@@ -244,13 +264,19 @@ def test_web_companion_decoupled_static_assets():
     # 4. Check syntax validity of JS files
     import shutil
     import subprocess
+
     if shutil.which("node"):
-        p = subprocess.run(["node", "-c", "static/js/app.js", "static/js/trading.js", "static/js/settings.js"], capture_output=True, text=True)
+        p = subprocess.run(
+            ["node", "-c", "static/js/app.js", "static/js/trading.js", "static/js/settings.js"],
+            capture_output=True,
+            text=True,
+        )
         assert p.returncode == 0, f"JS syntax check failed: {p.stderr}"
 
     # 5. Check 404 for missing static asset
     res_404 = client.get("/static/css/nonexistent.css")
     assert res_404.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_api_config_ai_and_groq_persistence():
@@ -275,7 +301,7 @@ async def test_api_config_ai_and_groq_persistence():
         "gemini_search_model": "gemini-3.5-flash-lite",
         "enable_search_grounding": True,
         "groq_api_key": "gsk_test12345",
-        "groq_model": "llama-3.3-70b-versatile"
+        "groq_model": "llama-3.3-70b-versatile",
     }
 
     res = client.post("/api/config", json=payload, headers={"X-Auth-PIN": pin})
@@ -294,6 +320,7 @@ async def test_api_config_ai_and_groq_persistence():
     assert saved.get("enable_search_grounding") is True
     assert saved.get("groq_api_key") == "gsk_test12345"
     assert saved.get("groq_model") == "llama-3.3-70b-versatile"
+
 
 def test_dump_pydantic_model_compatibility():
     from engine.api_routes import dump_pydantic_model
@@ -317,6 +344,7 @@ def test_dump_pydantic_model_compatibility():
 
     assert dump_pydantic_model(PlainDummy()) == {"a": 3, "b": "plain"}
 
+
 @pytest.mark.asyncio
 async def test_api_config_with_simulated_pydantic_v1():
     from engine.api_routes import update_config
@@ -324,6 +352,7 @@ async def test_api_config_with_simulated_pydantic_v1():
 
     orig_allowed = list(state.allowed_discord_user_ids)
     try:
+
         class MockV1Config:
             def __init__(self):
                 self.max_trade_usdt = 25.0
@@ -372,6 +401,7 @@ async def test_api_config_with_simulated_pydantic_v1():
     finally:
         state.allowed_discord_user_ids = orig_allowed
 
+
 def test_api_deduplicate_trades():
     from fastapi.testclient import TestClient
 
@@ -385,6 +415,7 @@ def test_api_deduplicate_trades():
     data = res.json()
     assert data["status"] == "ok"
     assert "pruned_duplicates" in data
+
 
 @pytest.mark.asyncio
 async def test_api_decide_all_and_by_id_endpoints():
@@ -424,6 +455,7 @@ async def test_api_decide_all_and_by_id_endpoints():
         assert res_data["results"][0]["status"] == "rejected"
         assert len(state.pending_trades) == 0
 
+
 @pytest.mark.asyncio
 async def test_api_trades_analysis_and_reconcile_endpoints():
     from httpx import ASGITransport, AsyncClient
@@ -448,6 +480,7 @@ async def test_api_trades_analysis_and_reconcile_endpoints():
         tr_res = await ac.get("/api/trades", headers={"X-Auth-PIN": state.auth_pin})
         assert tr_res.status_code == 200
         assert "asset_performance" in tr_res.json()
+
 
 @pytest.mark.asyncio
 async def test_ai_routes_endpoints():
@@ -480,7 +513,12 @@ async def test_ai_routes_endpoints():
     r3 = client.post(
         "/api/ai/test",
         headers={"X-Auth-PIN": pin},
-        json={"provider": "custom", "model": "test-model", "api_key": "bad_key", "base_url": "http://127.0.0.1:9999/v1"}
+        json={
+            "provider": "custom",
+            "model": "test-model",
+            "api_key": "bad_key",
+            "base_url": "http://127.0.0.1:9999/v1",
+        },
     )
     assert r3.status_code == 200
     assert r3.json()["status"] == "error"
@@ -493,6 +531,7 @@ async def test_ai_routes_endpoints():
     r5 = client.delete("/api/ai/chat/history?session_id=pytest_test", headers={"X-Auth-PIN": pin})
     assert r5.status_code == 200
     assert r5.json()["cleared"] is False
+
 
 @pytest.mark.asyncio
 async def test_ai_config_persistence_and_encryption():
@@ -517,7 +556,7 @@ async def test_ai_config_persistence_and_encryption():
         "ai_base_url": "https://api.openai.com/v1",
         "ai_fallback_provider": "groq",
         "ai_fallback_model": "llama-3.3-70b-versatile",
-        "ai_fallback_api_key": "gsk-secret67890"
+        "ai_fallback_api_key": "gsk-secret67890",
     }
 
     resp = client.post("/api/config", headers={"X-Auth-PIN": pin}, json=payload)
@@ -543,3 +582,59 @@ async def test_ai_config_persistence_and_encryption():
     assert d["ai_provider"] == "openai"
     assert d["ai_model"] == "gpt-4o-mini"
     assert d["has_ai"] is True
+
+
+@pytest.mark.asyncio
+async def test_dca_configuration_persistence_and_toggle(async_client):
+    from engine.db import load_config_item
+    from engine.state import state
+
+    pin = state.auth_pin or "1234"
+
+    # 1. Verify dca_enabled in state.to_dict()["strategies"]
+    d = state.to_dict()
+    assert "dca_enabled" in d["strategies"]
+    assert "dca_interval" in d["strategies"]
+
+    # 2. Test dedicated toggle endpoint /api/strategy/dca/toggle
+    resp = await async_client.post("/api/strategy/dca/toggle?enabled=true", headers={"X-Auth-PIN": pin})
+    assert resp.status_code == 200
+    assert resp.json()["dca_enabled"] is True
+    assert state.dca_strategy.enabled is True
+
+    # Check persistence in DB
+    saved = await load_config_item("risk_config")
+    assert saved.get("dca_enabled") is True
+
+    # Toggle with no param (flips to False)
+    resp = await async_client.post("/api/strategy/dca/toggle", headers={"X-Auth-PIN": pin})
+    assert resp.status_code == 200
+    assert resp.json()["dca_enabled"] is False
+    assert state.dca_strategy.enabled is False
+
+    # Check persistence flipped to False
+    saved = await load_config_item("risk_config")
+    assert saved.get("dca_enabled") is False
+
+    # 3. Test saving via /api/config payload with dca_enabled=True and dca_interval=1800
+    cfg_payload = {
+        "max_trade_usdt": 50.0,
+        "max_daily_spend_usdt": 200.0,
+        "min_usdt_reserve": 20.0,
+        "require_human_approval": True,
+        "auth_pin": pin,
+        "dca_enabled": True,
+        "dca_interval": 1800,
+        "favorite_pairs": "BTCUSDT,ETHUSDT",
+    }
+    resp = await async_client.post("/api/config", headers={"X-Auth-PIN": pin}, json=cfg_payload)
+    assert resp.status_code == 200
+    assert state.dca_strategy.enabled is True
+    assert state.dca_strategy.interval_sec == 1800
+
+    saved = await load_config_item("risk_config")
+    assert saved.get("dca_enabled") is True
+    assert saved.get("dca_interval") == 1800
+
+    # Reset state to default False
+    await async_client.post("/api/strategy/dca/toggle?enabled=false", headers={"X-Auth-PIN": pin})

@@ -14,6 +14,7 @@ from engine.strategies import DCAStrategy, RSIStrategy, TPSLStrategy, calculate_
 
 STATIC_ENGINE_SALT = b"cripto-3ds-pbkdf2-salt-2026-moto"
 
+
 def get_cipher(pin: str) -> Fernet:
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -21,15 +22,18 @@ def get_cipher(pin: str) -> Fernet:
         salt=STATIC_ENGINE_SALT,
         iterations=100_000,
     )
-    key = base64.urlsafe_b64encode(kdf.derive(str(pin).encode('utf-8')))
+    key = base64.urlsafe_b64encode(kdf.derive(str(pin).encode("utf-8")))
     return Fernet(key)
+
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 env_candidates = [
     os.path.join(PROJECT_DIR, ".env"),
     os.path.join(PROJECT_DIR, "testnet.env"),
     os.path.join(PROJECT_DIR, "config.env"),
-    ".env", "testnet.env", "config.env"
+    ".env",
+    "testnet.env",
+    "config.env",
 ]
 for ec in env_candidates:
     if os.path.exists(ec):
@@ -53,6 +57,7 @@ class ConfigModel(BaseModel):
     secret_key: str = ""
     favorite_pairs: str = "BTCUSDT,ETHUSDT"
     testnet: bool = True
+    dca_enabled: bool = False
     dca_interval: int = 3600
     rsi_threshold: float = 30.0
     tp_percent: float = 5.0
@@ -89,6 +94,7 @@ class ConfigModel(BaseModel):
     ai_scout_interval_hours: float = 2.0
     ai_scout_min_confidence: float = 0.85
 
+
 class BotState:
     def __init__(self):
         self.is_active: bool = True
@@ -96,17 +102,12 @@ class BotState:
         self.favorite_pairs: list[str] = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
         env_discord_ids = os.getenv("ALLOWED_DISCORD_USER_IDS") or os.getenv("DISCORD_USER_ID", "")
         self.allowed_discord_user_ids: list[str] = [x.strip() for x in env_discord_ids.split(",") if x.strip()]
-        self.prices: dict[str, float] = {
-            "BTCUSDT": 0.0,
-            "ETHUSDT": 0.0,
-            "BNBUSDT": 0.0,
-            "SOLUSDT": 0.0
-        }
+        self.prices: dict[str, float] = {"BTCUSDT": 0.0, "ETHUSDT": 0.0, "BNBUSDT": 0.0, "SOLUSDT": 0.0}
         self.usdt_balance: float = 1000.0
         self.portfolio_balances: dict[str, float] = {}
         self.current_pair_idx: int = 0
         self.pending_trades: dict[int, dict[str, Any]] = {}
-        self.binance_client: AsyncClient = None # type: ignore
+        self.binance_client: AsyncClient = None  # type: ignore
         self.auth_pin: str = "1234"
         self.api_key: str = ""
         self.secret_key: str = ""
@@ -135,7 +136,13 @@ class BotState:
         self.enable_search_grounding: bool = False
         self.groq_api_key: str = ""
         self.groq_model: str = "llama-3.3-70b-versatile"
-        self.available_gemini_models: list[str] = ["gemini-3.1-flash", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3-flash-preview"]
+        self.available_gemini_models: list[str] = [
+            "gemini-3.1-flash",
+            "gemini-3.1-flash-lite",
+            "gemini-flash-lite-latest",
+            "gemini-3.5-flash-lite",
+            "gemini-3-flash-preview",
+        ]
         self.ai_scout_enabled: bool = True
         self.ai_scout_interval_hours: float = 2.0
         self.ai_scout_min_confidence: float = 0.85
@@ -175,6 +182,7 @@ class BotState:
             return
         try:
             from engine.agentic_decision import calculate_dynamic_trade_parameters, project_trade_outcome
+
             pair = trade.get("pair", "BTCUSDT")
             asset_sym = pair.replace("USDT", "")
             cost_basis = float(self.cost_bases.get(pair, 0.0))
@@ -186,7 +194,7 @@ class BotState:
                 cost_basis=cost_basis,
                 current_holdings=holdings,
                 dynamic_tp=dyn_params["dynamic_tp_percent"],
-                dynamic_sl=dyn_params["dynamic_sl_percent"]
+                dynamic_sl=dyn_params["dynamic_sl_percent"],
             )
         except Exception:
             pass
@@ -199,6 +207,7 @@ class BotState:
             trade_id = value.get("id")
             if trade_id is None:
                 import time
+
                 trade_id = int(time.time())
                 value["id"] = trade_id
             self._attach_projection(value)
@@ -208,6 +217,7 @@ class BotState:
         trade_id = trade.get("id")
         if trade_id is None:
             import time
+
             trade_id = int(time.time() * 1000)
             trade["id"] = trade_id
         self._attach_projection(trade)
@@ -235,10 +245,7 @@ class BotState:
             rsi_val = round(self.rsi_strategy.calculate_rsi(pair), 1)
             history = self.rsi_strategy.price_histories.get(pair, [])
             _, _, _, pct_b = calculate_bollinger_bands(history, period=20, num_std=2.0)
-            indicators[pair] = {
-                "rsi": rsi_val,
-                "pct_b": round(pct_b, 2)
-            }
+            indicators[pair] = {"rsi": rsi_val, "pct_b": round(pct_b, 2)}
 
         return {
             "is_active": self.is_active,
@@ -258,10 +265,11 @@ class BotState:
                 "min_usdt_reserve": risk_manager.min_usdt_reserve,
                 "require_human_approval": risk_manager.require_human_approval,
                 "auth_pin_set": bool(self.auth_pin),
-                "allowed_discord_user_ids": self.allowed_discord_user_ids
+                "allowed_discord_user_ids": self.allowed_discord_user_ids,
             },
             "has_keys": bool(self.api_key and self.secret_key),
             "strategies": {
+                "dca_enabled": self.dca_strategy.enabled,
                 "dca_interval": self.dca_strategy.interval_sec,
                 "dca_last_trade": self.dca_strategy.last_trade_time,
                 "rsi_threshold": self.rsi_strategy.oversold_rsi,
@@ -277,12 +285,12 @@ class BotState:
                 "bull_rsi_threshold": getattr(self.rsi_strategy, "bull_rsi_threshold", 42.0),
                 "rsi_timeframe_minutes": self.rsi_strategy.timeframe_minutes,
                 "rsi_history_length": self.rsi_strategy.history_length,
-                "signal_cooldown_hours": self.signal_cooldown_hours
+                "signal_cooldown_hours": self.signal_cooldown_hours,
             },
             "ai_scout": {
                 "enabled": self.ai_scout_enabled,
                 "interval_hours": self.ai_scout_interval_hours,
-                "min_confidence": self.ai_scout_min_confidence
+                "min_confidence": self.ai_scout_min_confidence,
             },
             "discord_webhook_url": self.discord_webhook_url,
             "has_discord_bot": bool(self.discord_bot_token and self.discord_channel_id),
@@ -305,7 +313,8 @@ class BotState:
             "available_gemini_models": self.available_gemini_models,
             "asset_performance": self.asset_performance,
             "agentic_portfolio_review": self.agentic_portfolio_review,
-            "logs": list(recent_logs)
+            "logs": list(recent_logs),
         }
+
 
 state = BotState()

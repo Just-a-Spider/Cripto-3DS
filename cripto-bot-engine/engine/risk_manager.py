@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger("CriptoBotEngine.Risk")
@@ -10,11 +11,18 @@ class RiskManager:
         self.min_usdt_reserve: float = 20.0     # Keep $20 USDT untouched
         self.require_human_approval: bool = True # Require 3DS / Web confirmation
         self.daily_spent_usdt: float = 0.0
+        self._last_refresh_time: float = 0.0
+        self._refresh_ttl: float = 10.0
 
-    async def refresh_daily_spend(self, is_testnet: bool = True) -> float:
+    async def refresh_daily_spend(self, is_testnet: bool = True, force: bool = False) -> float:
+        now = time.time()
+        if not force and (now - self._last_refresh_time) < self._refresh_ttl:
+            return self.daily_spent_usdt
+
         try:
             from engine.db import get_rolling_daily_spend
             self.daily_spent_usdt = await get_rolling_daily_spend(is_testnet=is_testnet)
+            self._last_refresh_time = now
         except Exception as e:
             logger.warning(f"Could not refresh rolling daily spend: {e}")
         return self.daily_spent_usdt
