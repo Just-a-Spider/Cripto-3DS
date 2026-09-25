@@ -1,10 +1,13 @@
 import asyncio
 import time
-import aiohttp
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, asdict
 from abc import ABC, abstractmethod
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, List, Optional
+
+import aiohttp
+
 from engine.logger import logger
+
 
 @dataclass
 class NewsItem:
@@ -17,7 +20,7 @@ class NewsItem:
 
 class BaseNewsProvider(ABC):
     @abstractmethod
-    async def fetch_news(self, assets: List[str]) -> List[NewsItem]:
+    async def fetch_news(self, assets: list[str]) -> list[NewsItem]:
         pass
 
 class CryptoPanicProvider(BaseNewsProvider):
@@ -29,8 +32,8 @@ class CryptoPanicProvider(BaseNewsProvider):
         self.api_token = api_token
         self.base_url = "https://cryptopanic.com/api/v1/posts/"
 
-    async def fetch_news(self, assets: List[str]) -> List[NewsItem]:
-        items: List[NewsItem] = []
+    async def fetch_news(self, assets: list[str]) -> list[NewsItem]:
+        items: list[NewsItem] = []
         try:
             url = f"{self.base_url}?auth_token={self.api_token}&public=true" if self.api_token else "https://cryptopanic.com/api/v1/posts/?public=true"
             async with aiohttp.ClientSession() as session:
@@ -43,7 +46,7 @@ class CryptoPanicProvider(BaseNewsProvider):
                             domain = post.get("domain", "CryptoPanic")
                             post_url = post.get("url", "")
                             votes = post.get("votes", {})
-                            
+
                             # Basic sentiment heuristic from votes
                             bullish = votes.get("bullish", 0)
                             bearish = votes.get("bearish", 0)
@@ -102,11 +105,11 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
     via official google-genai SDK to fetch live, real-time web news, SEC catalysts, and market events.
     Disabled by default on free tier accounts to prevent HTTP 429 quota exhaustion.
     """
-    def __init__(self, api_key: str = "", fallback_provider: Optional[BaseNewsProvider] = None):
+    def __init__(self, api_key: str = "", fallback_provider: BaseNewsProvider | None = None):
         self.api_key = api_key
         self.fallback = fallback_provider or CryptoPanicProvider()
 
-    async def fetch_news(self, assets: List[str]) -> List[NewsItem]:
+    async def fetch_news(self, assets: list[str]) -> list[NewsItem]:
         global _grounding_circuit_breaker_until
         from engine.state import state
 
@@ -130,15 +133,15 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
             target_list = assets if assets else ["BTC", "ETH", "SOL", "BNB"]
             assets_str = ", ".join(target_list)
             prompt = f"Search live Google breaking news today for cryptocurrency assets {assets_str}. Return key catalysts, SEC filings, or exchange developments."
-            
+
             config = types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],
                 temperature=0.2
             )
-            
+
             loop = asyncio.get_running_loop()
             model_name = getattr(state, "gemini_search_model", "gemini-3.1-flash-lite").replace("models/", "")
-            
+
             response = await loop.run_in_executor(
                 None,
                 lambda: client.models.generate_content(
@@ -148,24 +151,24 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
                 )
             )
 
-            items: List[NewsItem] = []
+            items: list[NewsItem] = []
             if response and response.candidates:
                 candidate = response.candidates[0]
                 grounding_meta = getattr(candidate, "grounding_metadata", None)
-                
+
                 chunks = getattr(grounding_meta, "grounding_chunks", []) if grounding_meta else []
                 for chunk in chunks:
                     web = getattr(chunk, "web", None)
                     if web and getattr(web, "uri", None) and getattr(web, "title", None):
                         title = web.title
                         url = web.uri
-                        
+
                         matched_asset = "MARKET"
                         for a in assets:
                             if a.upper() in title.upper():
                                 matched_asset = a.upper()
                                 break
-                        
+
                         tag = "NEUTRAL"
                         if any(k in title.lower() for k in ["hack", "sec", "lawsuit", "delist", "crash", "ban"]):
                             tag = "HIGH_RISK"
@@ -182,7 +185,7 @@ class GoogleSearchGroundingProvider(BaseNewsProvider):
                             sentiment_tag=tag,
                             published_at=time.time()
                         ))
-                
+
             if items:
                 logger.info(f"Google Search Grounding successfully retrieved {len(items)} live web news items.")
                 return items[:10]
@@ -259,13 +262,13 @@ class NewsServiceManager:
     """
     Manages news fetching, caching, and background periodic refresh.
     """
-    def __init__(self, provider: Optional[BaseNewsProvider] = None):
+    def __init__(self, provider: BaseNewsProvider | None = None):
         self.provider = provider or CryptoPanicProvider()
-        self.cached_news: List[NewsItem] = []
+        self.cached_news: list[NewsItem] = []
         self.last_fetched: float = 0.0
         self.cache_ttl: float = 2700.0  # 45 minutes
 
-    async def get_latest_news(self, assets: List[str], force_refresh: bool = False) -> List[NewsItem]:
+    async def get_latest_news(self, assets: list[str], force_refresh: bool = False) -> list[NewsItem]:
         now = time.time()
         if not force_refresh and self.cached_news and (now - self.last_fetched) < self.cache_ttl:
             return self.cached_news

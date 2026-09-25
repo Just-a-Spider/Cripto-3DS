@@ -1,36 +1,49 @@
-import os
 import asyncio
+import os
 import time
+
+from engine.db import get_average_buy_price, log_trade
 from engine.logger import logger
-from engine.state import state
 from engine.risk_manager import risk_manager
-from engine.db import log_trade, get_average_buy_price
+from engine.state import state
 from engine.ws_manager import broadcast_state
+
+
+async def refresh_asset_performance():
+    try:
+        from engine.history_analyzer import analyze_and_reconcile_history
+        analysis = await analyze_and_reconcile_history(is_testnet=state.testnet, update_db=True)
+        state.asset_performance = analysis
+        for p, pdata in analysis.get("assets", {}).items():
+            if pdata.get("current_position_qty", 0.0) > 0 and pdata.get("current_cost_basis", 0.0) > 0:
+                state.cost_bases[p] = pdata["current_cost_basis"]
+    except Exception as e:
+        logger.warning(f"Could not refresh asset performance: {e}")
 
 async def fetch_binance_cost_basis(client, pair: str, current_qty: float) -> float:
     try:
         trades = await client.get_my_trades(symbol=pair)
         if not trades:
             return 0.0
-            
+
         trades.reverse() # Newest first
         accumulated_qty = 0.0
         accumulated_cost = 0.0
-        
+
         for t in trades:
             if t.get('isBuyer'):
                 qty = float(t.get('qty', 0))
                 price = float(t.get('price', 0))
-                
+
                 # Only average the buys that make up our current holdings
                 needed = current_qty - accumulated_qty
                 if needed <= 0:
                     break
-                    
+
                 use_qty = min(qty, needed)
                 accumulated_qty += use_qty
                 accumulated_cost += use_qty * price
-                
+
         if accumulated_qty > 0:
             return accumulated_cost / accumulated_qty
     except Exception as e:
@@ -59,20 +72,21 @@ async def refresh_cost_bases():
     for asset, qty in state.portfolio_balances.items():
         if qty > 0 and asset != "USDT":
             pair = asset + "USDT"
-            
+
             binance_avg = 0.0
             if state.binance_client and state.is_active:
                 binance_avg = await fetch_binance_cost_basis(state.binance_client, pair, qty)
-                
+
             if binance_avg > 0:
                 state.cost_bases[pair] = binance_avg
             else:
                 state.cost_bases[pair] = await get_average_buy_price(pair, state.testnet)
 
 import math
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Any, Dict, List, Optional, Tuple
 
-def get_symbol_filter(pair: str) -> Dict[str, float]:
+
+def get_symbol_filter(pair: str) -> dict[str, float]:
     return state.exchange_filters.get(pair, {
         "minQty": 0.00001,
         "maxQty": 999999.0,
@@ -81,7 +95,7 @@ def get_symbol_filter(pair: str) -> Dict[str, float]:
         "tickSize": 0.01
     })
 
-def format_and_validate_order(pair: str, action: str, amount_usdt: float, price: float, raw_qty: float = 0.0) -> Tuple[bool, float, float, str]:
+def format_and_validate_order(pair: str, action: str, amount_usdt: float, price: float, raw_qty: float = 0.0) -> tuple[bool, float, float, str]:
     filters = get_symbol_filter(pair)
     step = filters.get("stepSize", 0.0001)
     min_notional = filters.get("minNotional", 5.0)
@@ -135,7 +149,7 @@ def format_and_validate_order(pair: str, action: str, amount_usdt: float, price:
             return False, qty, effective_usdt, f"Quantity {qty} is below minQty ({min_qty})"
         return True, qty, effective_usdt, "OK"
 
-def extract_actual_order_price(order: Dict[str, Any], fallback_price: float) -> Tuple[float, float, float]:
+def extract_actual_order_price(order: dict[str, Any], fallback_price: float) -> tuple[float, float, float]:
     if not order or not isinstance(order, dict):
         return fallback_price, 0.0, 0.0
 
@@ -155,7 +169,7 @@ def extract_actual_order_price(order: Dict[str, Any], fallback_price: float) -> 
 
     return fallback_price, executed_qty, cummulative_usdt
 
-async def decide_trade(approved: bool, trade_id: Optional[int] = None, pair: Optional[str] = None, override_usdt: Optional[float] = None) -> Dict[str, Any]:
+async def decide_trade(approved: bool, trade_id: int | None = None, pair: str | None = None, override_usdt: float | None = None) -> dict[str, Any]:
     trade = None
     if trade_id is not None:
         trade = state.pending_trades.get(trade_id)
@@ -173,7 +187,7 @@ async def decide_trade(approved: bool, trade_id: Optional[int] = None, pair: Opt
             trade['amount_usdt'] = override_usdt
             if trade['price'] > 0:
                 trade['amount_asset'] = override_usdt / trade['price']
-        
+
         if tid is not None:
             state.remove_pending_trade(tid)
         else:
@@ -181,7 +195,7 @@ async def decide_trade(approved: bool, trade_id: Optional[int] = None, pair: Opt
 
         if approved:
             logger.info(f"Trade APPROVED: {trade['action']} {trade['pair']} (ID: {tid})")
-            
+
             # 1. Risk Manager validation
             valid, reason = risk_manager.validate_trade(trade['action'], trade['amount_usdt'], state.usdt_balance)
             if not valid:
@@ -258,7 +272,7 @@ async def decide_trade(approved: bool, trade_id: Optional[int] = None, pair: Opt
                 realized_pnl_usdt=realized_pnl_usdt,
                 realized_pnl_percent=realized_pnl_percent
             )
-            
+
             if state.binance_client:
                 await sync_binance_balances()
             else:
@@ -271,6 +285,7 @@ async def decide_trade(approved: bool, trade_id: Optional[int] = None, pair: Opt
                     state.portfolio_balances[asset] = max(0.0, state.portfolio_balances.get(asset, 0.0) - adj_qty)
 
             asyncio.create_task(refresh_cost_bases())
+            asyncio.create_task(refresh_asset_performance())
             await broadcast_state()
             return {
                 "status": "approved",
@@ -286,7 +301,7 @@ async def decide_trade(approved: bool, trade_id: Optional[int] = None, pair: Opt
             return {"status": "rejected", "trade": trade}
     return {"status": "no_pending_trade"}
 
-async def decide_all_trades(approved: bool) -> List[Dict[str, Any]]:
+async def decide_all_trades(approved: bool) -> list[dict[str, Any]]:
     trade_ids = list(state.pending_trades.keys())
     results = []
     for tid in trade_ids:
@@ -295,7 +310,7 @@ async def decide_all_trades(approved: bool) -> List[Dict[str, Any]]:
     return results
 
 
-async def execute_manual_sell(asset: str, percent: float, pin: str) -> Dict[str, Any]:
+async def execute_manual_sell(asset: str, percent: float, pin: str) -> dict[str, Any]:
     asset = asset.upper().strip()
     if asset == "USDT":
         return {"status": "error", "message": "Cannot sell USDT for USDT."}
@@ -380,6 +395,7 @@ async def execute_manual_sell(asset: str, percent: float, pin: str) -> Dict[str,
         state.usdt_balance += exec_usdt
 
     asyncio.create_task(refresh_cost_bases())
+    asyncio.create_task(refresh_asset_performance())
     await broadcast_state()
 
     return {
@@ -393,7 +409,7 @@ async def execute_manual_sell(asset: str, percent: float, pin: str) -> Dict[str,
         "realized_pnl_percent": realized_pnl_percent
     }
 
-async def execute_manual_buy(asset: str, usdt_amount: float, pin: str) -> Dict[str, Any]:
+async def execute_manual_buy(asset: str, usdt_amount: float, pin: str) -> dict[str, Any]:
     """
     Executes a manual market BUY order for a specified USDT amount.
     Validates auth PIN, risk manager rules, minNotional, and executes order on Binance.
@@ -475,6 +491,7 @@ async def execute_manual_buy(asset: str, usdt_amount: float, pin: str) -> Dict[s
         state.usdt_balance = max(0.0, state.usdt_balance - exec_usdt)
 
     asyncio.create_task(refresh_cost_bases())
+    asyncio.create_task(refresh_asset_performance())
     await broadcast_state()
 
     return {
@@ -486,7 +503,7 @@ async def execute_manual_buy(asset: str, usdt_amount: float, pin: str) -> Dict[s
         "order_id": order_id
     }
 
-async def sync_binance_2026_trades(client=None, pairs: Optional[List[str]] = None) -> Dict[str, Any]:
+async def sync_binance_2026_trades(client=None, pairs: list[str] | None = None) -> dict[str, Any]:
     """
     Backfills all real Binance transaction fills from 2026-01-01T00:00:00Z to present
     into the local SQLite database and reconciles accurate cost bases and realized PnL.
@@ -501,7 +518,7 @@ async def sync_binance_2026_trades(client=None, pairs: Optional[List[str]] = Non
     target_pairs = list(dict.fromkeys(raw_pairs))
 
     total_imported = 0
-    from engine.db import order_exists, log_trade, deduplicate_trade_history
+    from engine.db import deduplicate_trade_history, log_trade, order_exists
 
     for pair in target_pairs:
         try:
@@ -541,6 +558,7 @@ async def sync_binance_2026_trades(client=None, pairs: Optional[List[str]] = Non
             logger.warning(f"Error syncing 2026 trades for {pair}: {e}")
 
     await deduplicate_trade_history(state.testnet)
+    await refresh_asset_performance()
     await refresh_cost_bases()
     await risk_manager.refresh_daily_spend(state.testnet)
     await broadcast_state()

@@ -1,10 +1,12 @@
 import asyncio
 import json
+
 from engine.logger import logger
-from engine.state import state
-from engine.ws_manager import broadcast_state
-from engine.trades import decide_trade
 from engine.shared import save_strategy_state
+from engine.state import state
+from engine.trades import decide_trade
+from engine.ws_manager import broadcast_state
+
 
 async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
     async def handle_3ds_client(reader, writer):
@@ -18,11 +20,11 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                 line = await reader.readline()
                 if not line:
                     break
-                
+
                 cmd = line.decode('utf-8', errors='ignore').strip()
                 if not cmd:
                     continue
-                
+
                 logger.info(f"3DS Command received: {cmd}")
 
                 if cmd.startswith("AUTH "):
@@ -180,9 +182,9 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                     rsi = state.rsi_strategy.calculate_rsi(p)
                     fav_assets_list.append(f"{asset}:{bal:.4f}:{price:.2f}:{rsi:.1f}")
                 top_assets_str = ",".join(fav_assets_list)
-                
+
                 live_rsi = state.rsi_strategy.calculate_rsi(curr_pair)
-                
+
                 payload = {
                     "status": "ACTIVE" if state.is_active else "PAUSED",
                     "pair": curr_pair,
@@ -200,14 +202,17 @@ async def start_3ds_tcp_server(host: str = '0.0.0.0', port: int = 7343):
                     "ai_verdict": "",
                     "top_assets": top_assets_str
                 }
-                
+
                 if state.pending_trade:
                     payload["trade_action"] = state.pending_trade.get("action", "")
                     payload["trade_pair"] = state.pending_trade.get("pair", "")
                     reason = state.pending_trade.get("reason", "")
-                    if "Dollar Cost Averaging" in reason: reason = "DCA"
-                    elif "Take Profit" in reason: reason = "TP"
-                    elif "Stop Loss" in reason: reason = "SL"
+                    if "Dollar Cost Averaging" in reason:
+                        reason = "DCA"
+                    elif "Take Profit" in reason:
+                        reason = "TP"
+                    elif "Stop Loss" in reason:
+                        reason = "SL"
                     payload["trade_reason"] = reason[:10]
                     payload["trade_price"] = round(state.pending_trade.get("price", 0.0), 2)
                     payload["trade_amount_usdt"] = round(state.pending_trade.get("amount_usdt", 0.0), 2)

@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any, Tuple, Optional
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger("CriptoBotEngine.Risk")
 
@@ -19,14 +19,14 @@ class RiskManager:
             logger.warning(f"Could not refresh rolling daily spend: {e}")
         return self.daily_spent_usdt
 
-    def validate_trade(self, action: str, amount_usdt: float, current_usdt_balance: float, current_daily_spend: Optional[float] = None) -> Tuple[bool, str]:
+    def validate_trade(self, action: str, amount_usdt: float, current_usdt_balance: float, current_daily_spend: float | None = None) -> tuple[bool, str]:
         if amount_usdt < 5.0:
             return False, f"Order {amount_usdt:.2f} USDT is below Binance minimum $5.00."
 
         if action == "BUY":
             if amount_usdt > self.max_trade_usdt:
                 return False, f"Trade amount ${amount_usdt:.2f} exceeds max trade limit of ${self.max_trade_usdt:.2f}"
-                
+
             spend_now = current_daily_spend if current_daily_spend is not None else self.daily_spent_usdt
             if (spend_now + amount_usdt) > self.max_daily_spend_usdt:
                 return False, f"Trade exceeds rolling 24h spending limit of ${self.max_daily_spend_usdt:.2f} (Current 24h spend: ${spend_now:.2f})"

@@ -1,24 +1,26 @@
-import os
 import asyncio
-import time
 import json
+import os
 import secrets
-import aiohttp
+import time
 from typing import Any, Dict, Optional, Union
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Header, HTTPException, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
-from engine.logger import logger, recent_logs
-from engine.state import state, ConfigModel, get_cipher
-from engine.ws_manager import ws_manager, broadcast_state
-from engine.risk_manager import risk_manager
-from engine.db import get_trade_history, save_config_item, load_config_item
-from engine.shared import save_strategy_state
-from engine.trades import decide_trade
+
+import aiohttp
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+
 from engine.binance_client import restart_binance_websocket
+from engine.db import get_trade_history, load_config_item, save_config_item
+from engine.logger import logger, recent_logs
+from engine.risk_manager import risk_manager
+from engine.shared import save_strategy_state
+from engine.state import ConfigModel, get_cipher, state
+from engine.trades import decide_trade
+from engine.ws_manager import broadcast_state, ws_manager
 
 router = APIRouter()
 
-def dump_pydantic_model(model: Any) -> Dict[str, Any]:
+def dump_pydantic_model(model: Any) -> dict[str, Any]:
     if hasattr(model, "model_dump") and callable(getattr(model, "model_dump")):
         return model.model_dump()
     if hasattr(model, "dict") and callable(getattr(model, "dict")):
@@ -80,10 +82,10 @@ async def update_config(cfg: ConfigModel):
     risk_manager.require_human_approval = cfg.require_human_approval
     state.auth_pin = cfg.auth_pin
     state.testnet = cfg.testnet
-    
+
     if cfg.favorite_pairs:
         state.favorite_pairs = [p.strip() for p in cfg.favorite_pairs.split(",") if p.strip()]
-        
+
     state.dca_strategy.interval_sec = cfg.dca_interval
     state.rsi_strategy.oversold_rsi = cfg.rsi_threshold
     state.tpsl_strategy.tp_percent = cfg.tp_percent
@@ -219,8 +221,8 @@ async def update_config(cfg: ConfigModel):
     cfg_dict["ai_scout_min_confidence"] = state.ai_scout_min_confidence
 
     await save_config_item("risk_config", cfg_dict)
-    logger.info(f"Updated engine config (Keys encrypted using Auth PIN).")
-    
+    logger.info("Updated engine config (Keys encrypted using Auth PIN).")
+
     if cfg.api_key or cfg.favorite_pairs:
         logger.info("Restarting Binance connections due to config change...")
         asyncio.create_task(restart_binance_websocket())
@@ -238,13 +240,44 @@ async def get_logs():
 
 @router.get("/api/trades", dependencies=[Depends(verify_pin)])
 async def get_trades(limit: int = 100):
-    from engine.db import get_trade_history, get_pnl_summary
+    from engine.db import get_pnl_summary, get_trade_history
     history = await get_trade_history(limit=limit, is_testnet=state.testnet)
     summary = await get_pnl_summary(is_testnet=state.testnet)
     return JSONResponse({
         "trades": history,
-        "summary": summary
+        "summary": summary,
+        "asset_performance": state.asset_performance
     })
+
+@router.get("/api/trades/analysis", dependencies=[Depends(verify_pin)])
+async def get_trades_analysis():
+    from engine.history_analyzer import analyze_and_reconcile_history
+    if not state.asset_performance:
+        state.asset_performance = await analyze_and_reconcile_history(is_testnet=state.testnet, update_db=False)
+    return JSONResponse(state.asset_performance)
+
+@router.post("/api/trades/reconcile", dependencies=[Depends(verify_pin)])
+async def api_reconcile_trades():
+    from engine.history_analyzer import analyze_and_reconcile_history
+    analysis = await analyze_and_reconcile_history(is_testnet=state.testnet, update_db=True)
+    state.asset_performance = analysis
+    for p, pdata in analysis.get("assets", {}).items():
+        if pdata.get("current_position_qty", 0.0) > 0 and pdata.get("current_cost_basis", 0.0) > 0:
+            state.cost_bases[p] = pdata["current_cost_basis"]
+    await broadcast_state()
+    return JSONResponse({"status": "ok", "analysis": analysis})
+
+@router.get("/api/ai/portfolio_review", dependencies=[Depends(verify_pin)])
+async def api_get_portfolio_review():
+    from engine.agentic_decision import generate_agentic_portfolio_review
+    if not state.agentic_portfolio_review:
+        state.agentic_portfolio_review = await generate_agentic_portfolio_review(
+            state.asset_performance,
+            state.to_dict(),
+            api_key=state.ai_api_key or state.gemini_api_key,
+            model=state.ai_model or state.gemini_model
+        )
+    return JSONResponse(state.agentic_portfolio_review)
 
 @router.delete("/api/trades/clear", dependencies=[Depends(verify_pin)])
 async def clear_trades(only_rejected: bool = True):
@@ -265,7 +298,8 @@ async def api_deduplicate_trades():
 @router.post("/api/discord/test", dependencies=[Depends(verify_pin)])
 async def test_discord_connection():
     import discord
-    from engine.notifier import discord_bot_service, HAS_DISCORD_PY
+
+    from engine.notifier import HAS_DISCORD_PY, discord_bot_service
     if not HAS_DISCORD_PY:
         return JSONResponse({"status": "error", "message": "discord.py is not installed on this machine."})
 
@@ -338,7 +372,8 @@ async def toggle_bot(active: bool):
     await broadcast_state()
     return {"status": "ok", "is_active": state.is_active}
 
-from engine.trades import decide_trade, decide_all_trades
+from engine.trades import decide_all_trades
+
 
 @router.post("/api/trade/decide", dependencies=[Depends(verify_pin)])
 async def api_decide_trade(approved: bool, trade_id: int = None, pair: str = None, override_usdt: float = None):
@@ -374,13 +409,13 @@ async def simulate_trade(count: int = 1):
         staged.append(t)
 
     logger.info(f"Simulated {len(staged)} trade decision(s) queued.")
-    
+
     from engine.notifier import send_discord_notification
     cfg = await load_config_item("risk_config") or {}
     subject = f"Crypto Bot Alert: Simulated Signals ({len(staged)} Assets)"
     body = f"Simulated trade signals require approval: {', '.join(t['pair'] for t in staged)}"
     asyncio.create_task(send_discord_notification(subject, body, cfg, trades=staged))
-    
+
     await broadcast_state()
     return {"status": "ok", "pending_trades": staged, "pending_trade": state.pending_trade}
 
@@ -395,6 +430,7 @@ async def force_evaluate_endpoint(x_auth_pin: str = Header(None)):
     return {"status": "cooldowns_cleared"}
 
 from pydantic import BaseModel
+
 
 class ManualSellRequest(BaseModel):
     asset: str
@@ -445,7 +481,9 @@ async def api_sync_2026_trades():
 
 @router.post("/api/test/run", dependencies=[Depends(verify_pin)])
 async def api_run_test_suite():
-    import asyncio, time, sys
+    import asyncio
+    import sys
+    import time
     start = time.time()
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "pytest", "tests/test_engine.py", "-k", "not test_api_run_test_suite", "-v",

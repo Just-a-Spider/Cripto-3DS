@@ -2,6 +2,7 @@
 from engine.db import save_config_item
 from engine.state import state
 
+
 async def save_strategy_state():
     state_data = {
         "dca_cooldowns": state.dca_strategy.cooldowns,

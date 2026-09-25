@@ -4,10 +4,11 @@ setup_env.py - Headless configuration wizard for Cripto-3DS Engine.
 Generates or updates .env with proper permissions (0600) for edge deployment (e.g. Termux on Moto E20).
 """
 
+import argparse
 import os
 import sys
-import argparse
 from pathlib import Path
+
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(
@@ -49,7 +50,7 @@ def setup_environment(cli_args=None):
 
     existing_values = {}
     if env_path.exists():
-        with open(env_path, "r", encoding="utf-8") as f:
+        with open(env_path, encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
@@ -124,7 +125,7 @@ def setup_environment(cli_args=None):
 
     # AI Provider & Models
     ai_provider = cli_args.ai_provider.strip() if cli_args.ai_provider else existing_values.get("AI_PROVIDER", "google")
-    
+
     # Primary Key
     if cli_args.ai_key is not None:
         ai_key = cli_args.ai_key.strip()

@@ -1,11 +1,12 @@
-from typing import Dict, Any, List, Optional
 import time
+from typing import Any, Dict, List, Optional
+
 
 class BaseStrategy:
     def __init__(self, name: str):
         self.name = name
         self.enabled = False
-        self.cooldowns: Dict[str, float] = {}
+        self.cooldowns: dict[str, float] = {}
 
     def is_cooling_down(self, pair: str, cooldown_hours: float) -> bool:
         last_time = self.cooldowns.get(pair, 0.0)
@@ -14,7 +15,7 @@ class BaseStrategy:
     def record_signal(self, pair: str):
         self.cooldowns[pair] = time.time()
 
-    def evaluate(self, prices: Dict[str, float], usdt_balance: float, cooldown_hours: float = 0.0) -> Optional[Dict[str, Any]]:
+    def evaluate(self, prices: dict[str, float], usdt_balance: float, cooldown_hours: float = 0.0) -> dict[str, Any] | None:
         raise NotImplementedError
 
 class DCAStrategy(BaseStrategy):
@@ -24,7 +25,7 @@ class DCAStrategy(BaseStrategy):
         self.last_trade_time = time.time()
         self.current_index = 0
 
-    def evaluate(self, prices: Dict[str, float], usdt_balance: float, target_pairs: List[str], cooldown_hours: float = 0.0) -> Optional[Dict[str, Any]]:
+    def evaluate(self, prices: dict[str, float], usdt_balance: float, target_pairs: list[str], cooldown_hours: float = 0.0) -> dict[str, Any] | None:
         if not self.enabled or not target_pairs:
             return None
 
@@ -33,10 +34,10 @@ class DCAStrategy(BaseStrategy):
             # Round Robin logic
             self.current_index = (self.current_index + 1) % len(target_pairs)
             target = target_pairs[self.current_index]
-            
+
             if self.is_cooling_down(target, cooldown_hours):
                 return None
-                
+
             curr_price = prices.get(target, 0.0)
             if curr_price > 0:
                 self.last_trade_time = now
@@ -51,20 +52,20 @@ class DCAStrategy(BaseStrategy):
         return None
 
 import math
-from typing import Dict, Any, List, Optional, Tuple
-import time
+from typing import Any, Tuple
 
-def calculate_wilder_rsi(prices: List[float], period: int = 14) -> float:
+
+def calculate_wilder_rsi(prices: list[float], period: int = 14) -> float:
     if len(prices) < (period + 1):
         return 50.0
 
     changes = [prices[i] - prices[i-1] for i in range(1, len(prices))]
     gains = [max(0.0, c) for c in changes[:period]]
     losses = [max(0.0, -c) for c in changes[:period]]
-    
+
     avg_gain = sum(gains) / period
     avg_loss = sum(losses) / period
-    
+
     for c in changes[period:]:
         gain = max(0.0, c)
         loss = max(0.0, -c)
@@ -76,7 +77,7 @@ def calculate_wilder_rsi(prices: List[float], period: int = 14) -> float:
     rs = avg_gain / avg_loss
     return 100.0 - (100.0 / (1.0 + rs))
 
-def calculate_bollinger_bands(prices: List[float], period: int = 20, num_std: float = 2.0) -> Tuple[float, float, float, float]:
+def calculate_bollinger_bands(prices: list[float], period: int = 20, num_std: float = 2.0) -> tuple[float, float, float, float]:
     """Returns (middle_sma, upper_band, lower_band, percent_b)."""
     if len(prices) < 5:
         curr = prices[-1] if prices else 0.0
@@ -92,7 +93,7 @@ def calculate_bollinger_bands(prices: List[float], period: int = 20, num_std: fl
     lower = sma - (num_std * std_dev)
     band_width = upper - lower
     curr_price = subset[-1]
-    
+
     pct_b = (curr_price - lower) / band_width if band_width > 0 else 0.5
     return sma, upper, lower, pct_b
 
@@ -102,7 +103,7 @@ class MultiTimeframeFilter:
     Prevents buying a short-term oversold dip if macro trend is in a severe crash.
     """
     @staticmethod
-    def evaluate_confluence(history: List[float]) -> Tuple[bool, str]:
+    def evaluate_confluence(history: list[float]) -> tuple[bool, str]:
         if not history or len(history) < 10:
             return True, "OK"
 
@@ -137,8 +138,8 @@ class RSIStrategy(BaseStrategy):
         self.use_bb_filter = use_bb_filter
         self.bull_regime_dip_enabled = bull_regime_dip_enabled
         self.bull_rsi_threshold = bull_rsi_threshold
-        self.price_histories: Dict[str, List[float]] = {}
-        self.last_sample_times: Dict[str, float] = {}
+        self.price_histories: dict[str, list[float]] = {}
+        self.last_sample_times: dict[str, float] = {}
 
     def add_price(self, pair: str, price: float):
         now = time.time()
@@ -156,7 +157,7 @@ class RSIStrategy(BaseStrategy):
         history = self.price_histories.get(pair, [])
         return calculate_wilder_rsi(history, period=14)
 
-    def evaluate(self, prices: Dict[str, float], usdt_balance: float, target_pairs: List[str], portfolio: Dict[str, float], cost_bases: Dict[str, float], cooldown_hours: float = 0.0, can_buy: bool = True) -> Optional[Dict[str, Any]]:
+    def evaluate(self, prices: dict[str, float], usdt_balance: float, target_pairs: list[str], portfolio: dict[str, float], cost_bases: dict[str, float], cooldown_hours: float = 0.0, can_buy: bool = True) -> dict[str, Any] | None:
         if not self.enabled or not target_pairs:
             return None
 
@@ -260,26 +261,27 @@ class TPSLStrategy(BaseStrategy):
         self.partial_tp_enabled = partial_tp_enabled
         self.partial_tp_percent = partial_tp_percent
         self.partial_tp_ratio = partial_tp_ratio
-        self.peak_prices: Dict[str, float] = {}
-        self.custom_trail_deltas: Dict[str, float] = {}
-        self.tp_staged_positions: Dict[str, float] = {}
+        self.peak_prices: dict[str, float] = {}
+        self.custom_trail_deltas: dict[str, float] = {}
+        self.tp_staged_positions: dict[str, float] = {}
         self.enabled = True
 
-    def evaluate_tpsl(self, prices: Dict[str, float], portfolio: Dict[str, float], cost_bases: Dict[str, float], cooldown_hours: float = 0.0) -> Optional[Dict[str, Any]]:
-        if not self.enabled: return None
-        
+    def evaluate_tpsl(self, prices: dict[str, float], portfolio: dict[str, float], cost_bases: dict[str, float], cooldown_hours: float = 0.0) -> dict[str, Any] | None:
+        if not self.enabled:
+            return None
+
         for asset, qty in portfolio.items():
             if asset == "USDT" or qty <= 0.0:
                 continue
-                
+
             pair = asset + "USDT"
             curr_price = prices.get(pair, 0.0)
             avg_price = cost_bases.get(pair, 0.0)
-            
+
             if curr_price > 0 and avg_price > 0:
                 if (qty * curr_price) < 5.0:
                     continue
-                
+
                 profit_pct = ((curr_price - avg_price) / avg_price) * 100.0
 
                 # 1. Staged Partial Take-Profit Check (TP1 Scale-Out)
@@ -314,14 +316,14 @@ class TPSLStrategy(BaseStrategy):
                             "price": curr_price,
                             "reason": f"Breakeven Stop Protection (+{profit_pct:.2f}%)"
                         }
-                
+
                 if self.trailing_enabled:
                     # Check if profit reached activation threshold
                     if profit_pct >= self.trailing_activation_percent:
                         prev_peak = self.peak_prices.get(pair, avg_price)
                         new_peak = max(prev_peak, curr_price)
                         self.peak_prices[pair] = new_peak
-                        
+
                         effective_delta = self.custom_trail_deltas.get(pair, self.trailing_delta_percent)
                         pullback_pct = ((new_peak - curr_price) / new_peak) * 100.0
                         if pullback_pct >= effective_delta:

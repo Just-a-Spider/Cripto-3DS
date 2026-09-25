@@ -1,17 +1,20 @@
 import asyncio
 import json
 import time
-from typing import Set, Optional
+from typing import Optional, Set
+
 from fastapi import WebSocket
+
 from engine.state import state
+
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Set[WebSocket] = set()
+        self.active_connections: set[WebSocket] = set()
         self._last_broadcast_time: float = 0.0
         self._throttle_interval: float = 0.25  # 250ms = max 4Hz
         self._pending_broadcast: bool = False
-        self._broadcast_task: Optional[asyncio.Task] = None
+        self._broadcast_task: asyncio.Task | None = None
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()

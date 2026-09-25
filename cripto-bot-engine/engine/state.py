@@ -1,15 +1,16 @@
-import os
 import base64
-from cryptography.fernet import Fernet
-from typing import Dict, List, Any, Optional, Union
+import os
+from typing import Any, Dict, List, Optional, Union
+
 from binance import AsyncClient
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from dotenv import load_dotenv
 
 from engine.logger import logger, recent_logs
 from engine.risk_manager import risk_manager
 from engine.strategies import DCAStrategy, RSIStrategy, TPSLStrategy, calculate_bollinger_bands
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
 
 STATIC_ENGINE_SALT = b"cripto-3ds-pbkdf2-salt-2026-moto"
 
@@ -21,10 +22,6 @@ def get_cipher(pin: str) -> Fernet:
         iterations=100_000,
     )
     key = base64.urlsafe_b64encode(kdf.derive(str(pin).encode('utf-8')))
-    return Fernet(key)
-
-def get_legacy_cipher(pin: str) -> Fernet:
-    key = base64.urlsafe_b64encode(str(pin).zfill(32).encode('utf-8'))
     return Fernet(key)
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,6 +41,7 @@ BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "")
 IS_TESTNET = os.getenv("BINANCE_TESTNET", "true").lower() == "true"
 
 from pydantic import BaseModel
+
 
 class ConfigModel(BaseModel):
     max_trade_usdt: float
@@ -73,7 +71,7 @@ class ConfigModel(BaseModel):
     discord_webhook_url: str = ""
     discord_bot_token: str = ""
     discord_channel_id: str = ""
-    allowed_discord_user_ids: Union[str, List[str], List[int]] = ""
+    allowed_discord_user_ids: str | list[str] | list[int] = ""
     ai_provider: str = "google"
     ai_model: str = "gemini-3.1-flash"
     ai_api_key: str = ""
@@ -95,19 +93,19 @@ class BotState:
     def __init__(self):
         self.is_active: bool = True
         self.testnet: bool = IS_TESTNET
-        self.favorite_pairs: List[str] = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
+        self.favorite_pairs: list[str] = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
         env_discord_ids = os.getenv("ALLOWED_DISCORD_USER_IDS") or os.getenv("DISCORD_USER_ID", "")
-        self.allowed_discord_user_ids: List[str] = [x.strip() for x in env_discord_ids.split(",") if x.strip()]
-        self.prices: Dict[str, float] = {
+        self.allowed_discord_user_ids: list[str] = [x.strip() for x in env_discord_ids.split(",") if x.strip()]
+        self.prices: dict[str, float] = {
             "BTCUSDT": 0.0,
             "ETHUSDT": 0.0,
             "BNBUSDT": 0.0,
             "SOLUSDT": 0.0
         }
         self.usdt_balance: float = 1000.0
-        self.portfolio_balances: Dict[str, float] = {}
+        self.portfolio_balances: dict[str, float] = {}
         self.current_pair_idx: int = 0
-        self.pending_trades: Dict[int, Dict[str, Any]] = {}
+        self.pending_trades: dict[int, dict[str, Any]] = {}
         self.binance_client: AsyncClient = None # type: ignore
         self.auth_pin: str = "1234"
         self.api_key: str = ""
@@ -119,8 +117,8 @@ class BotState:
         self.rsi_strategy = RSIStrategy()
         self.rsi_strategy.enabled = True
         self.tpsl_strategy = TPSLStrategy()
-        self.cost_bases: Dict[str, float] = {}
-        self.exchange_filters: Dict[str, Dict[str, Any]] = {}
+        self.cost_bases: dict[str, float] = {}
+        self.exchange_filters: dict[str, dict[str, Any]] = {}
         self.discord_webhook_url: str = ""
         self.discord_bot_token: str = ""
         self.discord_channel_id: str = ""
@@ -137,10 +135,12 @@ class BotState:
         self.enable_search_grounding: bool = False
         self.groq_api_key: str = ""
         self.groq_model: str = "llama-3.3-70b-versatile"
-        self.available_gemini_models: List[str] = ["gemini-3.1-flash", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3-flash-preview"]
+        self.available_gemini_models: list[str] = ["gemini-3.1-flash", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3-flash-preview"]
         self.ai_scout_enabled: bool = True
         self.ai_scout_interval_hours: float = 2.0
         self.ai_scout_min_confidence: float = 0.85
+        self.asset_performance: dict[str, Any] = {}
+        self.agentic_portfolio_review: dict[str, Any] = {}
 
     @property
     def has_ai(self) -> bool:
@@ -165,13 +165,34 @@ class BotState:
         return any(str(x).strip() == uid_str for x in self.allowed_discord_user_ids)
 
     @property
-    def pending_trade(self) -> Optional[Dict[str, Any]]:
+    def pending_trade(self) -> dict[str, Any] | None:
         if not self.pending_trades:
             return None
         return next(iter(self.pending_trades.values()))
 
+    def _attach_projection(self, trade: dict[str, Any]):
+        if not isinstance(trade, dict) or "projection" in trade:
+            return
+        try:
+            from engine.agentic_decision import calculate_dynamic_trade_parameters, project_trade_outcome
+            pair = trade.get("pair", "BTCUSDT")
+            asset_sym = pair.replace("USDT", "")
+            cost_basis = float(self.cost_bases.get(pair, 0.0))
+            holdings = float(self.portfolio_balances.get(asset_sym, 0.0))
+            asset_perf = self.asset_performance.get("assets", {}).get(pair, {})
+            dyn_params = calculate_dynamic_trade_parameters(pair, asset_perf)
+            trade["projection"] = project_trade_outcome(
+                trade,
+                cost_basis=cost_basis,
+                current_holdings=holdings,
+                dynamic_tp=dyn_params["dynamic_tp_percent"],
+                dynamic_sl=dyn_params["dynamic_sl_percent"]
+            )
+        except Exception:
+            pass
+
     @pending_trade.setter
-    def pending_trade(self, value: Optional[Dict[str, Any]]):
+    def pending_trade(self, value: dict[str, Any] | None):
         if value is None:
             self.pending_trades.clear()
         else:
@@ -180,21 +201,23 @@ class BotState:
                 import time
                 trade_id = int(time.time())
                 value["id"] = trade_id
+            self._attach_projection(value)
             self.pending_trades[trade_id] = value
 
-    def add_pending_trade(self, trade: Dict[str, Any]) -> int:
+    def add_pending_trade(self, trade: dict[str, Any]) -> int:
         trade_id = trade.get("id")
         if trade_id is None:
             import time
             trade_id = int(time.time() * 1000)
             trade["id"] = trade_id
+        self._attach_projection(trade)
         self.pending_trades[trade_id] = trade
         return trade_id
 
-    def get_pending_trade(self, trade_id: int) -> Optional[Dict[str, Any]]:
+    def get_pending_trade(self, trade_id: int) -> dict[str, Any] | None:
         return self.pending_trades.get(trade_id)
 
-    def remove_pending_trade(self, trade_id: int) -> Optional[Dict[str, Any]]:
+    def remove_pending_trade(self, trade_id: int) -> dict[str, Any] | None:
         return self.pending_trades.pop(trade_id, None)
 
     def clear_pending_trades(self):
@@ -205,7 +228,7 @@ class BotState:
             if pair not in self.prices:
                 self.prices[pair] = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         self.sync_favorite_prices()
         indicators = {}
         for pair in self.favorite_pairs:
@@ -280,6 +303,8 @@ class BotState:
             "has_pin": bool(self.auth_pin),
             "allowed_discord_user_ids": list(self.allowed_discord_user_ids),
             "available_gemini_models": self.available_gemini_models,
+            "asset_performance": self.asset_performance,
+            "agentic_portfolio_review": self.agentic_portfolio_review,
             "logs": list(recent_logs)
         }
 

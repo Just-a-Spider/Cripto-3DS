@@ -1,12 +1,15 @@
 import asyncio
 import time
+
 from binance import AsyncClient, BinanceSocketManager
+
+from engine.db import load_config_item
 from engine.logger import logger
-from engine.state import state
-from engine.ws_manager import broadcast_state
 from engine.risk_manager import risk_manager
 from engine.shared import save_strategy_state
-from engine.db import load_config_item
+from engine.state import state
+from engine.ws_manager import broadcast_state
+
 
 async def listen_user_data(bm):
     backoff = 1
@@ -54,32 +57,32 @@ async def listen_market_data(bm):
                         close_price = float(data.get('c', 0.0))
                         if symbol in state.favorite_pairs:
                             state.prices[symbol] = close_price
-                            
+
                             if state.is_active and symbol not in [t.get('pair') for t in state.pending_trades.values()]:
                                 tpsl_sig = state.tpsl_strategy.evaluate_tpsl(state.prices, state.portfolio_balances, state.cost_bases, state.signal_cooldown_hours)
-                                
+
                                 sig = tpsl_sig
                                 max_buy = 0.0
                                 if not sig:
                                     max_buy = risk_manager.get_max_allowed_buy(state.usdt_balance)
                                     can_buy = max_buy >= 5.0
-                                    
+
                                     dca_sig = None
                                     if can_buy:
                                         dca_sig = state.dca_strategy.evaluate(state.prices, state.usdt_balance, state.favorite_pairs, state.signal_cooldown_hours)
-                                        
+
                                     rsi_sig = state.rsi_strategy.evaluate(
-                                        state.prices, state.usdt_balance, state.favorite_pairs, 
+                                        state.prices, state.usdt_balance, state.favorite_pairs,
                                         state.portfolio_balances, state.cost_bases, state.signal_cooldown_hours, can_buy=can_buy
                                     )
                                     sig = dca_sig or rsi_sig
-                                    
+
                                 if sig:
                                     amount_usdt = max_buy if sig['action'] == 'BUY' else risk_manager.max_trade_usdt
                                     amount_asset = sig.get("amount_asset", 0.0)
                                     if sig['action'] == 'SELL':
                                         amount_usdt = amount_asset * sig['price']
-                                        
+
                                     trade_id = int(time.time() * 1000)
                                     trade_payload = {
                                         "id": trade_id,
@@ -131,7 +134,7 @@ async def start_binance_websocket():
         client = await AsyncClient.create(api_key=state.api_key, api_secret=state.secret_key, testnet=state.testnet)
         state.binance_client = client
         logger.info(f"Connected to Binance AsyncClient (Testnet={state.testnet})")
-        
+
         try:
             account = await client.get_account()
             for asset in account.get("balances", []):
@@ -141,11 +144,11 @@ async def start_binance_websocket():
                 if asset["asset"] == "USDT":
                     state.usdt_balance = free_val
             logger.info(f"Initial API USDT Balance: ${state.usdt_balance:.2f}")
-            
+
             if state.favorite_pairs:
                 interval_map = {1: '1m', 3: '3m', 5: '5m', 15: '15m', 30: '30m', 60: '1h', 120: '2h', 240: '4h', 1440: '1d'}
                 kline_interval = interval_map.get(state.rsi_strategy.timeframe_minutes, '1h')
-                
+
                 for pair in state.favorite_pairs:
                     klines = await client.get_klines(symbol=pair, interval=kline_interval, limit=state.rsi_strategy.history_length)
                     history = [float(k[4]) for k in klines]

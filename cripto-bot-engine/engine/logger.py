@@ -1,5 +1,5 @@
-import logging
 import collections
+import logging
 
 recent_logs = collections.deque(maxlen=50)
 

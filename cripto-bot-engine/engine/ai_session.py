@@ -1,8 +1,9 @@
-import time
 import logging
-from typing import Dict, Any, List, Optional
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
+import time
+from typing import Any, Dict, List, Optional
+
 from langchain_core.chat_history import InMemoryChatMessageHistory
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from engine import ai_provider
 
@@ -37,7 +38,7 @@ class SessionManager:
     Manages multi-turn conversational chat sessions across Discord channels and Web Companion.
     """
     def __init__(self):
-        self._sessions: Dict[str, SessionEntry] = {}
+        self._sessions: dict[str, SessionEntry] = {}
 
     def get_or_create_session(self, session_id: str) -> SessionEntry:
         clean_id = (session_id or "default").strip()
@@ -48,7 +49,7 @@ class SessionManager:
         entry.touch()
         return entry
 
-    def get_history(self, session_id: str) -> List[Dict[str, str]]:
+    def get_history(self, session_id: str) -> list[dict[str, str]]:
         clean_id = (session_id or "default").strip()
         if clean_id not in self._sessions:
             return []
@@ -68,7 +69,7 @@ class SessionManager:
             return True
         return False
 
-    def list_active_sessions(self) -> List[Dict[str, Any]]:
+    def list_active_sessions(self) -> list[dict[str, Any]]:
         self.cleanup_expired()
         res = []
         for sid, entry in self._sessions.items():
@@ -98,15 +99,15 @@ session_manager = SessionManager()
 async def execute_chat_turn(
     query: str,
     session_id: str = "default",
-    market_context: Optional[Dict[str, Any]] = None,
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
-    fallback_provider: Optional[str] = None,
-    fallback_model: Optional[str] = None,
-    fallback_api_key: Optional[str] = None,
-) -> Dict[str, Any]:
+    market_context: dict[str, Any] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    fallback_provider: str | None = None,
+    fallback_model: str | None = None,
+    fallback_api_key: str | None = None,
+) -> dict[str, Any]:
     """
     Executes a multi-turn chat interaction with conversation memory and live market context.
     """
@@ -189,7 +190,7 @@ Live Market Context:
             executable = primary_model
 
     # Construct conversation messages with sanitized history
-    messages: List[BaseMessage] = [SystemMessage(content=system_prompt)]
+    messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
     for m in entry.history.messages:
         clean_text = ai_provider.extract_text_from_ai_message(m.content)
         if isinstance(m, HumanMessage):

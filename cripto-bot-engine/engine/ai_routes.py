@@ -1,13 +1,14 @@
 import logging
-from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, Query, Header, Request
+import secrets
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from engine.state import state
 from engine.ai_provider import SUPPORTED_PROVIDERS, test_ai_connection
-from engine.ai_session import session_manager, execute_chat_turn
-import secrets
+from engine.ai_session import execute_chat_turn, session_manager
+from engine.state import state
 
 logger = logging.getLogger("CriptoBotEngine")
 
@@ -26,13 +27,13 @@ def verify_ai_pin(request: Request, x_auth_pin: str = Header(None)):
 class AiTestRequest(BaseModel):
     provider: str = "google"
     model: str = "gemini-3.1-flash"
-    api_key: Optional[str] = ""
-    base_url: Optional[str] = ""
+    api_key: str | None = ""
+    base_url: str | None = ""
 
 
 class AiChatRequest(BaseModel):
     query: str
-    session_id: Optional[str] = "default"
+    session_id: str | None = "default"
 
 
 @router.get("/providers")

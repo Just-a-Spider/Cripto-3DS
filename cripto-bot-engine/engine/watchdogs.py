@@ -1,13 +1,15 @@
 import asyncio
 import datetime
 import time
-from engine.logger import logger
-from engine.state import state
-from engine.ws_manager import broadcast_state
-from engine.db import log_trade, load_config_item
-from engine.trades import refresh_cost_bases
+
 from engine.ai_analyst import scan_market_opportunities
+from engine.db import load_config_item, log_trade
+from engine.logger import logger
 from engine.risk_manager import risk_manager
+from engine.state import state
+from engine.trades import refresh_cost_bases
+from engine.ws_manager import broadcast_state
+
 
 async def trade_timeout_watchdog():
     while True:
@@ -75,7 +77,7 @@ async def ai_opportunity_scout_watchdog():
                     logger.info(f"AI Opportunity Scout running scheduled market scan (interval: {interval_hours}h)...")
 
                     market_ctx = state.to_dict()
-                    
+
                     # Extract market regime from indicators for AI context
                     _indicators = market_ctx.get("indicators", {})
                     _rsi_vals = []
@@ -90,7 +92,7 @@ async def ai_opportunity_scout_watchdog():
                         _market_regime = "BEARISH_FEAR"
                     else:
                         _market_regime = "NEUTRAL"
-                    
+
                     result = await scan_market_opportunities(market_ctx, state.gemini_api_key, model=state.gemini_model, market_regime=_market_regime)
                     opps = result.get("top_opportunities", [])
                     _min_conf_base = float(getattr(state, "ai_scout_min_confidence", 0.85))

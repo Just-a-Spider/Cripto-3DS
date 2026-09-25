@@ -1,14 +1,14 @@
-import time
 import json
 import logging
-from typing import Optional, Dict, Any, List, Union
+import time
+from typing import Any, Dict, List, Optional, Union
 
-from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 logger = logging.getLogger("CriptoBotEngine")
 
-SUPPORTED_PROVIDERS: Dict[str, Dict[str, Any]] = {
+SUPPORTED_PROVIDERS: dict[str, dict[str, Any]] = {
     "google": {
         "id": "google",
         "name": "Google Gemini",
@@ -124,13 +124,13 @@ SUPPORTED_PROVIDERS: Dict[str, Dict[str, Any]] = {
 
 
 def get_chat_model(
-    provider: Optional[str] = None,
-    model_name: Optional[str] = None,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
+    provider: str | None = None,
+    model_name: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
     temperature: float = 0.2,
     max_tokens: int = 600
-) -> Optional[BaseChatModel]:
+) -> BaseChatModel | None:
     """
     Factory function instantiating a LangChain BaseChatModel for the requested provider.
     """
@@ -324,16 +324,16 @@ async def execute_ai_completion(
     prompt: str,
     system_instruction: str = "",
     json_mode: bool = False,
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-    api_key: Optional[str] = None,
-    base_url: Optional[str] = None,
-    fallback_provider: Optional[str] = None,
-    fallback_model: Optional[str] = None,
-    fallback_api_key: Optional[str] = None,
+    provider: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    fallback_provider: str | None = None,
+    fallback_model: str | None = None,
+    fallback_api_key: str | None = None,
     temperature: float = 0.2,
     max_tokens: int = 600
-) -> Optional[str]:
+) -> str | None:
     """
     Executes an async completion through LangChain with automatic fallback chain failover.
     """
@@ -368,10 +368,10 @@ async def execute_ai_completion(
             logger.warning(f"Could not build LangChain with_fallbacks chain: {e}. Using primary directly.")
             executable_model = primary
 
-    messages: List[BaseMessage] = []
+    messages: list[BaseMessage] = []
     if system_instruction:
         messages.append(SystemMessage(content=system_instruction))
-    
+
     prompt_text = prompt
     if json_mode and "json" not in prompt_text.lower():
         prompt_text += "\nRespond strictly in valid JSON format."
@@ -398,7 +398,7 @@ async def test_ai_connection(
     model_name: str,
     api_key: str = "",
     base_url: str = ""
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Diagnostics ping testing provider credentials, base_url, and latency.
     """

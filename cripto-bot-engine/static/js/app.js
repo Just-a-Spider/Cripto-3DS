@@ -172,6 +172,20 @@ function updateUI(data) {
             const timerEl = document.getElementById("trade-timer-" + t.id);
             if (timerEl) timerEl.innerText = t.timeout_sec;
         } else {
+            const proj = t.projection;
+            let projBadge = "";
+            if (proj && proj.summary_str) {
+                const isProfit = proj.outcome_type === "PROFIT" || (proj.action === "BUY" && (proj.risk_reward_ratio || 0) >= 1.5);
+                const isLoss = proj.outcome_type === "LOSS";
+                const borderClr = isLoss ? "#ff5555" : (isProfit ? "#50fa7b" : "#f1fa8c");
+                const label = proj.action === "SELL" ? "Projected Exit Return" : "Projected Trade Parameters";
+                projBadge = `
+                    <div style="background: rgba(0,0,0,0.06); border-left: 3px solid ${borderClr}; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 0.88rem;">
+                        <span style="font-weight: 700; font-size: 0.75rem; text-transform: uppercase; color: #555; letter-spacing: 0.5px;">${label}</span>
+                        <div style="font-weight: 600; color: #111; margin-top: 2px;">${proj.summary_str}</div>
+                    </div>`;
+            }
+
             const aiCard = t.ai_verdict ? `
                 <div style="background: rgba(0,0,0,0.06); border: 1px solid rgba(0,0,0,0.15); border-radius: 8px; padding: 10px; margin-bottom: 15px; font-size: 0.88rem;">
                     <div style="display: flex; gap: 15px; align-items: center; margin-bottom: 4px;">
@@ -190,6 +204,7 @@ function updateUI(data) {
                         <strong>Price:</strong> $${t.price.toFixed(4)}<br>
                         <strong>Amount:</strong> $<input type="number" id="override-trade-amount" value="${t.amount_usdt.toFixed(2)}" style="width: 80px; padding: 2px; font-weight: bold; background: #fff; color: #000; border: none; border-radius: 4px; text-align: center;"> USDT
                     </p>
+                    ${projBadge}
                     ${aiCard}
                     <p style="font-weight: bold; color: var(--yellow);">Expires in <span id="trade-timer-${t.id}">${t.timeout_sec}</span>s...</p>
                     <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center;">
@@ -205,6 +220,10 @@ function updateUI(data) {
 
     if (document.getElementById("settings-modal").style.display !== "flex" && typeof populateSettingsInputs === "function") {
         populateSettingsInputs(data);
+    }
+
+    if (data.asset_performance) {
+        renderAssetPerformance(data.asset_performance);
     }
 
     if (data.logs) {
@@ -227,11 +246,55 @@ function updateUI(data) {
     }
 }
 
+function renderAssetPerformance(assetPerf) {
+    if (!assetPerf) return;
+    const tbody = document.getElementById("asset-performance-table");
+    if (!tbody) return;
+
+    const assets = assetPerf.assets || {};
+    const glob = assetPerf.global || {};
+    const badgeEl = document.getElementById("best-asset-badge");
+    if (badgeEl && glob.best_performing_asset && glob.best_performing_asset !== "NONE") {
+        badgeEl.innerText = `Top Alpha: ${glob.best_performing_asset}`;
+    }
+
+    const assetKeys = Object.keys(assets);
+    if (assetKeys.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding: 10px; color: var(--comment);">No asset history recorded yet.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = assetKeys.map(k => {
+        const m = assets[k];
+        const pnl = m.net_realized_pnl_usdt || 0.0;
+        const pnlColor = pnl >= 0 ? "var(--green)" : "var(--red)";
+        const statusClass = m.performance_status === "DRAWDOWN" ? "badge-paused" : (m.performance_status.includes("PROFIT") ? "badge-active" : "badge-neutral");
+        const streakStr = (m.consecutive_losses >= 2) ? `<span style="color:var(--red); font-size:0.75rem;">(${m.consecutive_losses}L streak)</span>` : "";
+
+        return `
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                <td style="padding: 6px; font-weight: bold;">${m.asset || k}</td>
+                <td style="padding: 6px;">${m.closed_trades || 0}</td>
+                <td style="padding: 6px;">${m.wins || 0}W / ${m.losses || 0}L</td>
+                <td style="padding: 6px; font-weight: bold;">${m.win_rate || 0.0}%</td>
+                <td style="padding: 6px; color: ${pnlColor}; font-weight: bold;">${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}</td>
+                <td style="padding: 6px;">${m.current_cost_basis > 0 ? '$' + m.current_cost_basis.toFixed(2) : '---'}</td>
+                <td style="padding: 6px;">${m.current_position_qty > 0 ? m.current_position_qty.toFixed(4) : '0.0'}</td>
+                <td style="padding: 6px;"><span class="badge ${statusClass}" style="font-size:0.75rem; padding: 2px 6px;">${m.performance_status || 'NEUTRAL'}</span> ${streakStr}</td>
+            </tr>
+        `;
+    }).join("");
+}
+
 async function fetchTrades() {
     try {
         const res = await fetch(getApiBase() + "/api/trades", { headers: { "X-Auth-PIN": authPin } });
         if (!res.ok) return;
         const data = await res.json();
+
+        if (data.asset_performance) {
+            renderAssetPerformance(data.asset_performance);
+        }
         
         if (data.summary) {
             const pnl = data.summary.total_pnl_usdt || 0.0;

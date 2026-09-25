@@ -1,13 +1,14 @@
 import io
-import time
 import json
 import logging
+import time
+from typing import Any, Dict, List, Optional
+
 import aiohttp
-from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger("CriptoBotEngine")
 
-async def fetch_klines(pair: str, interval: str = "1h", limit: int = 30) -> Optional[List[dict]]:
+async def fetch_klines(pair: str, interval: str = "1h", limit: int = 30) -> list[dict] | None:
     """
     Fetches candlestick klines directly from Binance public API.
     """
@@ -35,7 +36,7 @@ async def fetch_klines(pair: str, interval: str = "1h", limit: int = 30) -> Opti
         return None
 
 
-def calculate_rsi_series(closes: List[float], period: int = 14) -> List[float]:
+def calculate_rsi_series(closes: list[float], period: int = 14) -> list[float]:
     """
     Calculates Wilder's RSI series over a list of close prices.
     """
@@ -71,7 +72,7 @@ def calculate_rsi_series(closes: List[float], period: int = 14) -> List[float]:
     return rsi_series
 
 
-async def generate_candlestick_chart(pair: str, klines: List[dict], interval: str = "1h") -> io.BytesIO:
+async def generate_candlestick_chart(pair: str, klines: list[dict], interval: str = "1h") -> io.BytesIO:
     """
     Generates a dark-theme financial candlestick chart PNG without heavy C++ packages.
     Uses QuickChart v3 engine over async aiohttp. Zero compilation, zero memory overhead.

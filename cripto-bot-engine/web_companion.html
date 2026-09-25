@@ -101,6 +101,34 @@
                 </div>
             </div>
 
+            <!-- ASSET PERFORMANCE SCORECARD -->
+            <div id="asset-performance-container" style="margin-bottom: 20px;">
+                <div style="font-size: 0.95rem; font-weight: bold; margin-bottom: 8px; color: var(--foreground); display: flex; justify-content: space-between; align-items: center;">
+                    <span>Asset Performance Scorecard</span>
+                    <span id="best-asset-badge" style="font-size: 0.8rem; color: var(--green);"></span>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+                        <thead>
+                            <tr style="border-bottom: 2px solid var(--btn-shadow); color: var(--comment);">
+                                <th style="padding: 6px;">Asset</th>
+                                <th style="padding: 6px;">Closed</th>
+                                <th style="padding: 6px;">Wins / Losses</th>
+                                <th style="padding: 6px;">Win Rate</th>
+                                <th style="padding: 6px;">Realized PnL</th>
+                                <th style="padding: 6px;">Avg Cost Basis</th>
+                                <th style="padding: 6px;">Remaining Qty</th>
+                                <th style="padding: 6px;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="asset-performance-table">
+                            <tr><td colspan="8" style="text-align:center; padding: 10px; color: var(--comment);">No asset history loaded yet.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div style="font-size: 0.95rem; font-weight: bold; margin-bottom: 8px; color: var(--foreground);">Trade Ledger</div>
             <div style="overflow-x: auto; max-height: 260px;">
                 <table style="width: 100%; border-collapse: collapse; font-size: 0.88rem; text-align: left;">
                     <thead>
