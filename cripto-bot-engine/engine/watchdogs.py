@@ -51,7 +51,7 @@ async def cost_basis_watchdog():
         await asyncio.sleep(1800)
         await refresh_cost_bases()
 
-_last_scout_time = 0.0
+_last_scout_time = time.time()
 _scout_cooldowns = {}
 
 async def ai_opportunity_scout_watchdog():
@@ -169,6 +169,17 @@ async def ai_opportunity_scout_watchdog():
                             if asset_val < 5.0:
                                 logger.info(f"AI Scout: Skipping SELL {pair} - Insufficient {asset} holding (${asset_val:.2f} < $5.00 Binance min).")
                                 continue
+
+                            # Safety check: Never sell at a loss if stop-loss is disabled or setup is TAKE_PROFIT
+                            cost_basis = float(state.cost_bases.get(pair, 0.0))
+                            profit_pct = ((curr_price - cost_basis) / cost_basis) * 100.0 if cost_basis > 0 else 0.0
+                            if "PROFIT" in stype.upper() and profit_pct <= 0:
+                                logger.info(f"AI Scout: Skipping TAKE_PROFIT SELL {pair} - Position is not in profit ({profit_pct:.2f}%).")
+                                continue
+                            if not getattr(state.tpsl_strategy, "sl_enabled", True) and profit_pct < 0:
+                                logger.info(f"AI Scout: Skipping SELL {pair} - Stop loss is disabled and position is at loss ({profit_pct:.2f}%).")
+                                continue
+
                             amount_asset = qty * getattr(state, "partial_tp_ratio", 0.5) if getattr(state, "partial_tp_enabled", True) else qty
                             amount_usdt = amount_asset * curr_price
                             if amount_usdt < 5.0:

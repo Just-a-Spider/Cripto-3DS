@@ -216,3 +216,51 @@ async def test_ai_scout_parallel_multi_asset_staging(monkeypatch):
     assert "BTCUSDT" in staged_pairs
     assert "ETHUSDT" in staged_pairs
     assert "SOLUSDT" in staged_pairs
+
+
+@pytest.mark.asyncio
+async def test_ai_scout_does_not_sell_at_loss_when_sl_disabled(monkeypatch):
+    import asyncio
+    import engine.watchdogs as wd_mod
+    from engine.state import state
+
+    state.is_active = True
+    state.gemini_api_key = "valid_key"
+    state.pending_trades.clear()
+    state.prices["DOGEUSDT"] = 0.0920
+    state.cost_bases["DOGEUSDT"] = 0.0935 # Bought higher: current position is at loss (-1.6%)
+    state.portfolio_balances["DOGE"] = 100.0
+    state.ai_scout_enabled = True
+    state.ai_scout_interval_hours = 1.0
+    state.ai_scout_min_confidence = 0.80
+    state.tpsl_strategy.sl_enabled = False # User disabled stop loss!
+    wd_mod._last_scout_time = 0.0
+    wd_mod._scout_cooldowns.clear()
+
+    async def mock_scan(ctx, api_key, model=None, market_regime=None):
+        return {
+            "market_regime": "NEUTRAL",
+            "top_opportunities": [
+                {
+                    "pair": "DOGEUSDT",
+                    "setup_type": "TAKE_PROFIT",
+                    "confidence": 0.85,
+                    "key_levels": "Resistance: $0.0930",
+                    "analysis": "Bollinger band resistance touched."
+                }
+            ]
+        }
+
+    monkeypatch.setattr(wd_mod, "scan_market_opportunities", mock_scan)
+
+    task = asyncio.create_task(wd_mod.ai_opportunity_scout_watchdog())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    # Must NOT stage SELL for DOGEUSDT because position is at a loss and sl_enabled is False!
+    assert len(state.pending_trades) == 0
+
