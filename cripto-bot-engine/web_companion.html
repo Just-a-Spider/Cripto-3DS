@@ -264,217 +264,327 @@
     <!-- SETTINGS MODAL -->
     <div id="settings-modal">
         <div class="modal-content">
-            <div class="header">
-                <h2>Configuration & Strategy</h2>
-                <button class="btn btn-red" onclick="document.getElementById('settings-modal').style.display='none'">X</button>
-            </div>
-            
-            <div class="grid" style="margin-bottom: 20px;">
-                <div>
-                    <label>API Key:</label>
-                    <input type="password" id="api-key" placeholder="Encrypted on save">
-                </div>
-                <div>
-                    <label>Secret Key:</label>
-                    <input type="password" id="secret-key" placeholder="Encrypted on save">
-                </div>
-            </div>
-            
-            <div style="margin-bottom: 20px;">
-                <label>Favorite Pairs (Search & Add):</label>
-                <div style="display: flex; gap: 10px;">
-                    <input type="text" id="pair-search" list="symbols-list" placeholder="BTCUSDT">
-                    <button class="btn btn-green" onclick="addPair()">Add</button>
-                    <button class="btn btn-red" onclick="clearPairs()">Clear</button>
-                </div>
-                <datalist id="symbols-list"></datalist>
-                <div id="favorite-pairs-display" style="margin-top: 10px;"></div>
-            </div>
-            
-            <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
-            
-            <div class="grid">
-                <div>
-                    <label>Max Trade ($USDT):</label>
-                    <input type="number" id="max-trade" value="50">
-                </div>
-                <div>
-                    <label>Max Daily ($USDT):</label>
-                    <input type="number" id="max-daily" value="200">
-                </div>
-                <div>
-                    <label>Min Reserve ($USDT):</label>
-                    <input type="number" id="min-reserve" value="20">
-                </div>
-                <div>
-                    <label>Auth PIN (For Encryption):</label>
-                    <input type="text" id="auth-pin" value="1234">
-                </div>
-                <div>
-                    <br>
-                    <label><input type="checkbox" id="testnet-mode" checked> Testnet Mode</label><br>
-                    <label><input type="checkbox" id="require-approval" checked> Require Approval</label>
-                </div>
+            <div class="header" style="margin-bottom: 12px;">
+                <h2 style="margin: 0; font-size: 1.25rem; letter-spacing: 0.5px;">CONFIGURATION &amp; STRATEGY</h2>
+                <button class="btn btn-red" style="min-width: 40px; max-width: 44px; padding: 6px 10px; font-weight: 900;" onclick="document.getElementById('settings-modal').style.display='none'">X</button>
             </div>
 
-            <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
-            
-            <h3>Passive Strategy Rules</h3>
-            <div style="margin-bottom: 15px;">
-                <label><input type="checkbox" id="dca-enabled"> Enable DCA Strategy (Round-Robin)</label>
+            <!-- TABS NAVIGATION -->
+            <div class="settings-tabs">
+                <button type="button" class="settings-tab-btn active" id="tab-btn-api" onclick="switchSettingsTab('api')">API &amp; Access</button>
+                <button type="button" class="settings-tab-btn" id="tab-btn-pairs" onclick="switchSettingsTab('pairs')">Pairs &amp; Watchlist</button>
+                <button type="button" class="settings-tab-btn" id="tab-btn-risk" onclick="switchSettingsTab('risk')">Risk &amp; Limits</button>
+                <button type="button" class="settings-tab-btn" id="tab-btn-strategies" onclick="switchSettingsTab('strategies')">Strategies</button>
+                <button type="button" class="settings-tab-btn" id="tab-btn-ai" onclick="switchSettingsTab('ai')">AI Engine</button>
+                <button type="button" class="settings-tab-btn" id="tab-btn-discord" onclick="switchSettingsTab('discord')">Discord</button>
             </div>
-            <div class="grid">
-                <div>
-                    <label>DCA Interval (Seconds):</label>
-                    <input type="number" id="dca-interval" value="3600">
+
+            <!-- TAB 1: API & ACCESS -->
+            <div class="settings-tab-pane active" id="tab-api">
+                <div class="settings-card">
+                    <div class="settings-card-title">Binance API Credentials</div>
+                    <div class="grid">
+                        <div>
+                            <label>API Key:</label>
+                            <input type="password" id="api-key" placeholder="Encrypted on save">
+                        </div>
+                        <div>
+                            <label>Secret Key:</label>
+                            <input type="password" id="secret-key" placeholder="Encrypted on save">
+                        </div>
+                    </div>
+                    <div class="settings-hint">API keys are encrypted locally using AES-GCM via your Auth PIN.</div>
                 </div>
-                <div>
-                    <label>RSI Oversold (&lt;30):</label>
-                    <input type="number" id="rsi-threshold" value="30">
-                </div>
-                <div>
-                    <label>RSI Sample Time (Mins):</label>
-                    <input type="number" id="rsi-timeframe" value="60">
-                </div>
-                <div>
-                    <label>RSI History (Periods):</label>
-                    <input type="number" id="rsi-history" value="250">
-                </div>
-                <div>
-                    <label>Signal Cooldown (Hours):</label>
-                    <input type="number" id="signal-cooldown" value="24">
-                </div>
-                <div>
-                    <label>Global Take Profit (%):</label>
-                    <input type="number" id="tp-percent" value="5">
-                </div>
-                <div>
-                    <label>Global Stop Loss (%):</label>
-                    <input type="number" id="sl-percent" value="3">
-                </div>
-                <div>
-                    <label>Enable Trailing Stop Loss:</label>
-                    <input type="checkbox" id="trailing-enabled" style="width: 22px; height: 22px; margin-top: 8px;" checked>
-                </div>
-                <div>
-                    <label>TSL Activation (% Profit):</label>
-                    <input type="number" id="trailing-activation" value="3.0" step="0.5">
-                </div>
-                <div>
-                    <label>TSL Trail Delta (% Pullback):</label>
-                    <input type="number" id="trailing-delta" value="1.5" step="0.1">
-                </div>
-                <div>
-                    <label>Enable Bull Regime Dip Buy:</label>
-                    <input type="checkbox" id="bull-dip-enabled" style="width: 22px; height: 22px; margin-top: 8px;" checked>
-                </div>
-                <div>
-                    <label>Bull Dip RSI Threshold (&le;42):</label>
-                    <input type="number" id="bull-rsi-threshold" value="42.0" step="1.0">
-                </div>
-                <div>
-                    <label>Enable Staged Partial TP:</label>
-                    <input type="checkbox" id="partial-tp-enabled" style="width: 22px; height: 22px; margin-top: 8px;" checked>
-                </div>
-                <div>
-                    <label>Partial TP1 Target (%):</label>
-                    <input type="number" id="partial-tp-percent" value="4.0" step="0.5">
-                </div>
-                <div>
-                    <label>Partial TP Ratio (0.5 = 50%):</label>
-                    <input type="number" id="partial-tp-ratio" value="0.5" step="0.05" min="0.1" max="1.0">
-                </div>
-                <div>
-                    <label>Discord Bot Token (Interactive Buttons):</label>
-                    <input type="password" id="discord-bot-token" placeholder="Bot Token from Discord Portal">
-                </div>
-                <div>
-                    <label>Discord Channel ID:</label>
-                    <input type="text" id="discord-channel-id" placeholder="e.g. 123456789012345678">
-                </div>
-                <div style="grid-column: 1 / span 2;">
-                    <label>Discord Webhook URL (Fallback / Legacy):</label>
-                    <input type="text" id="discord-webhook" placeholder="https://discord.com/api/webhooks/...">
-                </div>
-                <div style="grid-column: 1 / span 2;">
-                    <label>Allowed Discord User IDs (Comma-separated RBAC):</label>
-                    <input type="text" id="allowed-discord-user-ids" placeholder="e.g. 123456789012345678, 987654321098765432">
-                </div>
-                <div style="grid-column: 1 / span 2; text-align: center; margin-top: 5px;">
-                    <button type="button" class="btn btn-blue" style="width: 100%;" onclick="testDiscordBot()">TEST DISCORD BOT CONNECTION</button>
+
+                <div class="settings-card">
+                    <div class="settings-card-title">Security &amp; Environment Mode</div>
+                    <div class="grid">
+                        <div class="settings-toggle-card">
+                            <input type="checkbox" id="testnet-mode" checked>
+                            <div>
+                                <label for="testnet-mode" class="settings-toggle-label">Testnet Mode</label>
+                                <div class="settings-hint">Trade on Binance Spot Testnet (paper) instead of Real Mainnet funds.</div>
+                            </div>
+                        </div>
+                        <div class="settings-toggle-card">
+                            <input type="checkbox" id="require-approval" checked>
+                            <div>
+                                <label for="require-approval" class="settings-toggle-label">Require Human Approval</label>
+                                <div class="settings-hint">When unchecked, trades auto-execute immediately without operator approval.</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <label>Auth PIN (For Encryption &amp; Dashboard Control):</label>
+                        <input type="text" id="auth-pin" value="1234" style="max-width: 200px;">
+                        <div class="settings-hint">Used for 3DS companion authentication and secret key encryption.</div>
+                    </div>
                 </div>
             </div>
 
-            <hr style="border: 1px dashed var(--btn-shadow); margin: 20px 0;">
+            <!-- TAB 2: PAIRS & WATCHLIST -->
+            <div class="settings-tab-pane" id="tab-pairs">
+                <div class="settings-card">
+                    <div class="settings-card-title">Active Watchlist</div>
+                    <label>Search &amp; Add Trading Pair:</label>
+                    <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+                        <input type="text" id="pair-search" list="symbols-list" placeholder="e.g. BTCUSDT" style="flex: 1;">
+                        <button type="button" class="btn btn-green" style="max-width: 100px;" onclick="addPair()">Add</button>
+                        <button type="button" class="btn btn-red" style="max-width: 100px;" onclick="clearPairs()">Clear All</button>
+                    </div>
+                    <datalist id="symbols-list"></datalist>
 
-            <h3>[AI] Universal Provider & Intelligence (LangChain)</h3>
-            <p style="font-size: 0.85rem; color: var(--comment); margin-bottom: 12px;">Powered by LangChain. Choose any cloud provider (Google, OpenAI, Anthropic, Groq, DeepSeek) or local offline model (Ollama).</p>
-            <div class="grid">
-                <div>
-                    <label>AI Provider:</label>
-                    <select id="ai-provider" onchange="onAiProviderChanged()" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
-                        <option value="google">Google Gemini (Default / Free Tier)</option>
-                        <option value="openai">OpenAI (GPT-4o, GPT-4o-mini)</option>
-                        <option value="anthropic">Anthropic Claude (Sonnet, Haiku)</option>
-                        <option value="groq">Groq Cloud (Llama-3.3-70b Free Tier)</option>
-                        <option value="deepseek">DeepSeek (deepseek-chat)</option>
-                        <option value="ollama">Ollama (Local Offline Self-Hosted)</option>
-                        <option value="openrouter">OpenRouter (100+ Models)</option>
-                        <option value="custom">Custom (OpenAI-Compatible Endpoint)</option>
-                    </select>
+                    <div style="margin-top: 10px;">
+                        <div style="font-size: 0.8rem; font-weight: bold; margin-bottom: 6px; color: var(--comment);">Quick Add Shortcuts:</div>
+                        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <button type="button" class="btn btn-accent" style="padding: 4px 10px; font-size: 0.75rem; min-width: 80px;" onclick="quickAddPair('BTCUSDT')">+ BTC</button>
+                            <button type="button" class="btn btn-accent" style="padding: 4px 10px; font-size: 0.75rem; min-width: 80px;" onclick="quickAddPair('ETHUSDT')">+ ETH</button>
+                            <button type="button" class="btn btn-accent" style="padding: 4px 10px; font-size: 0.75rem; min-width: 80px;" onclick="quickAddPair('XLMUSDT')">+ XLM</button>
+                            <button type="button" class="btn btn-accent" style="padding: 4px 10px; font-size: 0.75rem; min-width: 80px;" onclick="quickAddPair('XRPUSDT')">+ XRP</button>
+                            <button type="button" class="btn btn-accent" style="padding: 4px 10px; font-size: 0.75rem; min-width: 80px;" onclick="quickAddPair('DOGEUSDT')">+ DOGE</button>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 16px;">
+                        <label>Active Monitored Pairs:</label>
+                        <div id="favorite-pairs-display" style="min-height: 40px; padding: 10px; background: rgba(0,0,0,0.25); border: 1px solid var(--btn-shadow); border-radius: 8px;"></div>
+                    </div>
                 </div>
-                <div>
-                    <label>Inference Model:</label>
-                    <select id="ai-model" onchange="onAiModelChanged()" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
-                        <option value="gemini-3.1-flash">gemini-3.1-flash (Recommended / Fast)</option>
-                        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
-                        <option value="gemini-2.5-flash">gemini-2.5-flash</option>
-                    </select>
-                    <input type="text" id="ai-custom-model-input" placeholder="Enter custom model identifier..." style="display: none; width: 100%; margin-top: 6px; padding: 8px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
+            </div>
+
+            <!-- TAB 3: RISK & LIMITS -->
+            <div class="settings-tab-pane" id="tab-risk">
+                <div class="settings-card">
+                    <div class="settings-card-title">Capital Allocation &amp; Guardrails</div>
+                    <div class="grid">
+                        <div>
+                            <label>Max Trade Size ($USDT):</label>
+                            <input type="number" id="max-trade" value="50" min="5" step="1">
+                            <div class="settings-hint">Maximum spend allocated to a single market order.</div>
+                        </div>
+                        <div>
+                            <label>Max Daily Spend ($USDT):</label>
+                            <input type="number" id="max-daily" value="200" min="10" step="5">
+                            <div class="settings-hint">Rolling 24-hour total execution spend ceiling.</div>
+                        </div>
+                        <div>
+                            <label>Min USDT Cash Reserve ($USDT):</label>
+                            <input type="number" id="min-reserve" value="20" min="0" step="5">
+                            <div class="settings-hint">Safety cash cushion that the bot will never spend.</div>
+                        </div>
+                    </div>
                 </div>
-                <div style="grid-column: 1 / span 2;">
-                    <label id="ai-key-label">API Key:</label>
-                    <input type="password" id="ai-api-key" placeholder="Enter API Key (saved securely with PIN)">
-                </div>
-                <div id="ai-base-url-container" style="display: none; grid-column: 1 / span 2;">
-                    <label>Base URL (for Ollama, DeepSeek, OpenRouter, Custom):</label>
-                    <input type="text" id="ai-base-url" placeholder="http://localhost:11434/v1">
+            </div>
+
+            <!-- TAB 4: STRATEGIES -->
+            <div class="settings-tab-pane" id="tab-strategies">
+                <!-- Take Profit & Stop Loss -->
+                <div class="settings-card">
+                    <div class="settings-card-title">Take Profit &amp; Stop Loss Controls</div>
+                    <div class="grid" style="margin-bottom: 12px;">
+                        <div>
+                            <label>Global Take Profit (%):</label>
+                            <input type="number" id="tp-percent" value="5" step="0.5">
+                            <div class="settings-hint">Standard take-profit exit percentage target.</div>
+                        </div>
+                        <div>
+                            <label>Global Stop Loss (%):</label>
+                            <input type="number" id="sl-percent" value="3" step="0.5">
+                            <div class="settings-hint">Maximum drawdown limit before emergency cut.</div>
+                        </div>
+                    </div>
+
+                    <!-- Stop Loss Toggle -->
+                    <div class="settings-toggle-card">
+                        <input type="checkbox" id="sl-enabled" checked>
+                        <div>
+                            <label for="sl-enabled" class="settings-toggle-label">Enable Stop Loss Protection</label>
+                            <div class="settings-hint">When unchecked, Stop Loss is completely disabled and positions are held through dips.</div>
+                        </div>
+                    </div>
+
+                    <!-- Staged Partial TP -->
+                    <div class="settings-toggle-card">
+                        <input type="checkbox" id="partial-tp-enabled" checked>
+                        <div style="flex: 1;">
+                            <label for="partial-tp-enabled" class="settings-toggle-label">Enable Staged Partial Take Profit (Scale-Out)</label>
+                            <div class="settings-hint">Locks in gains at TP1 and moves stop to breakeven (+0.15%).</div>
+                            <div class="grid" style="margin-top: 8px;">
+                                <div>
+                                    <label>Partial TP1 Target (%):</label>
+                                    <input type="number" id="partial-tp-percent" value="4.0" step="0.5">
+                                </div>
+                                <div>
+                                    <label>Partial TP Ratio (0.5 = 50%):</label>
+                                    <input type="number" id="partial-tp-ratio" value="0.5" step="0.05" min="0.1" max="1.0">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Trailing Stop Loss -->
+                    <div class="settings-toggle-card">
+                        <input type="checkbox" id="trailing-enabled" checked>
+                        <div style="flex: 1;">
+                            <label for="trailing-enabled" class="settings-toggle-label">Enable Trailing Stop Loss Runner</label>
+                            <div class="settings-hint">Rides winning pumps and locks in gains after dynamic pullback.</div>
+                            <div class="grid" style="margin-top: 8px;">
+                                <div>
+                                    <label>TSL Activation (% Profit):</label>
+                                    <input type="number" id="trailing-activation" value="3.0" step="0.5">
+                                </div>
+                                <div>
+                                    <label>TSL Trail Delta (% Pullback):</label>
+                                    <input type="number" id="trailing-delta" value="1.5" step="0.1">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div style="grid-column: 1 / span 2; display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
-                    <button type="button" id="btn-test-ai" class="btn btn-blue" onclick="testAiConnection()" style="padding: 8px 14px; font-size: 0.85rem;">TEST AI CONNECTION</button>
-                    <div id="ai-test-status" style="font-size: 0.85rem;"></div>
-                    <button type="button" class="btn btn-red" onclick="clearAiSessionMemory()" style="padding: 8px 14px; font-size: 0.85rem;">CLEAR CHAT MEMORY</button>
+                <!-- RSI & Bollinger Strategy -->
+                <div class="settings-card">
+                    <div class="settings-card-title">RSI &amp; Bollinger Momentum Strategy</div>
+                    <div class="grid">
+                        <div>
+                            <label>RSI Oversold Threshold (&lt;30):</label>
+                            <input type="number" id="rsi-threshold" value="30">
+                            <div class="settings-hint">Standard entry trigger for oversold mean reversion.</div>
+                        </div>
+                        <div>
+                            <label>Signal Cooldown (Hours):</label>
+                            <input type="number" id="signal-cooldown" value="24" step="0.5">
+                            <div class="settings-hint">Prevents repeat trigger spam on the same asset.</div>
+                        </div>
+                        <div>
+                            <label>RSI Sample Time (Mins):</label>
+                            <input type="number" id="rsi-timeframe" value="60">
+                            <div class="settings-hint">Candle interval for indicator sampling (e.g. 60 = 1h).</div>
+                        </div>
+                        <div>
+                            <label>RSI History Periods:</label>
+                            <input type="number" id="rsi-history" value="250">
+                            <div class="settings-hint">Lookback buffer size for rolling calculation.</div>
+                        </div>
+                    </div>
+
+                    <div class="settings-toggle-card" style="margin-top: 12px;">
+                        <input type="checkbox" id="bull-dip-enabled" checked>
+                        <div style="flex: 1;">
+                            <label for="bull-dip-enabled" class="settings-toggle-label">Enable Bull Regime Dip Buy</label>
+                            <div class="settings-hint">Allows earlier entries at higher RSI during lower Bollinger support touches.</div>
+                            <div style="margin-top: 8px; max-width: 260px;">
+                                <label>Bull Dip RSI Threshold (&le;42):</label>
+                                <input type="number" id="bull-rsi-threshold" value="42.0" step="1.0">
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div>
-                    <label>Fallback Provider (Zero-Downtime Backup):</label>
-                    <select id="ai-fallback-provider" style="width: 100%; padding: 10px; background: var(--bg-dark); color: #fff; border: 1px solid var(--btn-shadow); border-radius: 6px;">
-                        <option value="groq">Groq Cloud (Llama-3.3-70b Backup)</option>
-                        <option value="google">Google Gemini Backup</option>
-                        <option value="openai">OpenAI Backup</option>
-                    </select>
+                <!-- DCA Strategy -->
+                <div class="settings-card">
+                    <div class="settings-card-title">DCA Strategy (Dollar Cost Averaging)</div>
+                    <div class="settings-toggle-card">
+                        <input type="checkbox" id="dca-enabled">
+                        <div style="flex: 1;">
+                            <label for="dca-enabled" class="settings-toggle-label">Enable DCA Strategy (Round-Robin)</label>
+                            <div class="settings-hint">Periodically buys monitored pairs in round-robin sequence regardless of indicator.</div>
+                            <div style="margin-top: 8px; max-width: 260px;">
+                                <label>DCA Interval (Seconds):</label>
+                                <input type="number" id="dca-interval" value="3600">
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div>
-                    <label>Fallback Model:</label>
-                    <input type="text" id="ai-fallback-model" value="llama-3.3-70b-versatile">
-                </div>
-                <div style="grid-column: 1 / span 2;">
-                    <label>Fallback API Key:</label>
-                    <input type="password" id="ai-fallback-key" placeholder="Fallback Provider Key...">
+            </div>
+
+            <!-- TAB 5: AI ENGINE -->
+            <div class="settings-tab-pane" id="tab-ai">
+                <div class="settings-card">
+                    <div class="settings-card-title">Universal AI Provider (LangChain)</div>
+                    <div class="grid">
+                        <div>
+                            <label>AI Provider:</label>
+                            <select id="ai-provider" onchange="onAiProviderChanged()">
+                                <option value="google">Google Gemini (Default / Free Tier)</option>
+                                <option value="openai">OpenAI (GPT-4o, GPT-4o-mini)</option>
+                                <option value="anthropic">Anthropic Claude (Sonnet, Haiku)</option>
+                                <option value="groq">Groq Cloud (Llama-3.3-70b Free Tier)</option>
+                                <option value="deepseek">DeepSeek (deepseek-chat)</option>
+                                <option value="ollama">Ollama (Local Offline Self-Hosted)</option>
+                                <option value="openrouter">OpenRouter (100+ Models)</option>
+                                <option value="custom">Custom (OpenAI-Compatible Endpoint)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label>Inference Model:</label>
+                            <select id="ai-model" onchange="onAiModelChanged()">
+                                <option value="gemini-3.1-flash">gemini-3.1-flash (Recommended / Fast)</option>
+                                <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite</option>
+                                <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                            </select>
+                            <input type="text" id="ai-custom-model-input" placeholder="Enter custom model identifier..." style="display: none; width: 100%; margin-top: 6px;">
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 10px;">
+                        <label id="ai-key-label">API Key:</label>
+                        <input type="password" id="ai-api-key" placeholder="Enter API Key (saved securely with PIN)">
+                    </div>
+
+                    <div id="ai-base-url-container" style="display: none; margin-top: 10px;">
+                        <label>Base URL (for Ollama, DeepSeek, OpenRouter, Custom):</label>
+                        <input type="text" id="ai-base-url" placeholder="http://localhost:11434/v1">
+                    </div>
+
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" id="btn-test-ai" class="btn btn-blue" onclick="testAiConnection()">TEST AI CONNECTION</button>
+                        <div id="ai-test-status" style="font-size: 0.85rem; font-weight: bold;"></div>
+                        <button type="button" class="btn btn-red" onclick="clearAiSessionMemory()">CLEAR CHAT MEMORY</button>
+                    </div>
                 </div>
 
-                <div>
-                    <label>Enable Autonomous AI Scout (Every 2h):</label>
-                    <input type="checkbox" id="ai-scout-enabled" style="width: 22px; height: 22px; margin-top: 8px;" checked>
+                <div class="settings-card">
+                    <div class="settings-card-title">Zero-Downtime Fallback Provider</div>
+                    <div class="grid">
+                        <div>
+                            <label>Fallback Provider:</label>
+                            <select id="ai-fallback-provider">
+                                <option value="groq">Groq Cloud (Llama-3.3-70b Backup)</option>
+                                <option value="google">Google Gemini Backup</option>
+                                <option value="openai">OpenAI Backup</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label>Fallback Model:</label>
+                            <input type="text" id="ai-fallback-model" value="llama-3.3-70b-versatile">
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <label>Fallback API Key:</label>
+                        <input type="password" id="ai-fallback-key" placeholder="Fallback Provider Key...">
+                    </div>
                 </div>
-                <div>
-                    <label>AI Scout Interval (Hours):</label>
-                    <input type="number" id="ai-scout-interval" value="2.0" step="0.5" min="0.25">
-                </div>
-                <div style="grid-column: 1 / span 2;">
-                    <label>AI Scout Min Confidence (0.85 = 85%):</label>
-                    <input type="number" id="ai-scout-confidence" value="0.85" step="0.05" min="0.5" max="1.0">
+
+                <div class="settings-card">
+                    <div class="settings-card-title">Autonomous AI Opportunity Scout</div>
+                    <div class="settings-toggle-card">
+                        <input type="checkbox" id="ai-scout-enabled" checked>
+                        <div style="flex: 1;">
+                            <label for="ai-scout-enabled" class="settings-toggle-label">Enable Autonomous Market Scout</label>
+                            <div class="settings-hint">Periodic LLM scan analyzing multi-pair setups, order books, and news catalysts.</div>
+                            <div class="grid" style="margin-top: 8px;">
+                                <div>
+                                    <label>Scout Interval (Hours):</label>
+                                    <input type="number" id="ai-scout-interval" value="2.0" step="0.5" min="0.25">
+                                </div>
+                                <div>
+                                    <label>Min Confidence (0.85 = 85%):</label>
+                                    <input type="number" id="ai-scout-confidence" value="0.85" step="0.05" min="0.5" max="1.0">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Hidden inputs for backward compatibility -->
@@ -484,9 +594,40 @@
                 <input type="hidden" id="groq-api-key" value="">
                 <input type="hidden" id="groq-model" value="llama-3.3-70b-versatile">
             </div>
-            
-            <div style="margin-top: 25px; text-align: center;">
-                <button class="btn btn-green" style="width: 100%; font-size: 1.1rem; padding: 12px;" onclick="saveConfig()">SAVE ALL SETTINGS</button>
+
+            <!-- TAB 6: DISCORD -->
+            <div class="settings-tab-pane" id="tab-discord">
+                <div class="settings-card">
+                    <div class="settings-card-title">Discord Interactive Gateway Bot</div>
+                    <div class="grid">
+                        <div>
+                            <label>Discord Bot Token:</label>
+                            <input type="password" id="discord-bot-token" placeholder="Bot Token from Discord Developer Portal">
+                        </div>
+                        <div>
+                            <label>Discord Channel ID:</label>
+                            <input type="text" id="discord-channel-id" placeholder="e.g. 123456789012345678">
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <label>Allowed Discord User IDs (RBAC Comma-Separated):</label>
+                        <input type="text" id="allowed-discord-user-ids" placeholder="e.g. 287709657492094978">
+                        <div class="settings-hint">Only specified Discord users can click interactive Approve / Reject buttons.</div>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        <label>Discord Webhook URL (Legacy Fallback):</label>
+                        <input type="text" id="discord-webhook" placeholder="https://discord.com/api/webhooks/...">
+                    </div>
+                    <div style="margin-top: 14px;">
+                        <button type="button" class="btn btn-blue" style="width: 100%;" onclick="testDiscordBot()">TEST DISCORD BOT CONNECTION</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODAL STICKY FOOTER -->
+            <div class="settings-modal-footer">
+                <button type="button" class="btn btn-red" onclick="document.getElementById('settings-modal').style.display='none'">CANCEL</button>
+                <button type="button" class="btn btn-green" style="min-width: 180px;" onclick="saveConfig()">SAVE ALL SETTINGS</button>
             </div>
         </div>
     </div>

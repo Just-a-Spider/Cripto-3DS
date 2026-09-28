@@ -62,6 +62,7 @@ class ConfigModel(BaseModel):
     rsi_threshold: float = 30.0
     tp_percent: float = 5.0
     sl_percent: float = 3.0
+    sl_enabled: bool = True
     trailing_enabled: bool = True
     trailing_activation_percent: float = 3.0
     trailing_delta_percent: float = 1.5
@@ -275,6 +276,7 @@ class BotState:
                 "rsi_threshold": self.rsi_strategy.oversold_rsi,
                 "tp_percent": self.tpsl_strategy.tp_percent,
                 "sl_percent": self.tpsl_strategy.sl_percent,
+                "sl_enabled": getattr(self.tpsl_strategy, "sl_enabled", True),
                 "trailing_enabled": self.tpsl_strategy.trailing_enabled,
                 "trailing_activation_percent": self.tpsl_strategy.trailing_activation_percent,
                 "trailing_delta_percent": self.tpsl_strategy.trailing_delta_percent,

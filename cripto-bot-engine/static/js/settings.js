@@ -21,6 +21,9 @@ function populateSettingsInputs(data) {
         if (data.strategies.dca_interval !== undefined) document.getElementById("dca-interval").value = data.strategies.dca_interval;
         if (data.strategies.rsi_threshold !== undefined) document.getElementById("rsi-threshold").value = data.strategies.rsi_threshold;
         if (data.strategies.tp_percent !== undefined) document.getElementById("tp-percent").value = data.strategies.tp_percent;
+        if (data.strategies.sl_enabled !== undefined && document.getElementById("sl-enabled")) {
+            document.getElementById("sl-enabled").checked = Boolean(data.strategies.sl_enabled);
+        }
         if (data.strategies.sl_percent !== undefined) document.getElementById("sl-percent").value = data.strategies.sl_percent;
         document.getElementById("trailing-enabled").checked = data.strategies.trailing_enabled !== false;
         document.getElementById("trailing-activation").value = data.strategies.trailing_activation_percent || 3.0;
@@ -82,7 +85,28 @@ async function showSettings() {
     if (lastStateData) {
         populateSettingsInputs(lastStateData);
     }
+    switchSettingsTab("api");
     document.getElementById("settings-modal").style.display = "flex";
+}
+
+function switchSettingsTab(tabId) {
+    const panes = document.querySelectorAll(".settings-tab-pane");
+    const btns = document.querySelectorAll(".settings-tab-btn");
+    panes.forEach(p => p.classList.remove("active"));
+    btns.forEach(b => b.classList.remove("active"));
+    const pane = document.getElementById("tab-" + tabId);
+    const btn = document.getElementById("tab-btn-" + tabId);
+    if (pane) pane.classList.add("active");
+    if (btn) btn.classList.add("active");
+}
+
+function quickAddPair(pair) {
+    if (pair && !currentPairs.includes(pair)) {
+        currentPairs.push(pair);
+        document.getElementById("favorite-pairs-display").innerHTML = currentPairs.map(p => 
+            `<div class="pair-tag">${p} <span onclick="removePair('${p}')">x</span></div>`
+        ).join("");
+    }
 }
 
 function addPair() {
@@ -109,6 +133,8 @@ function removePair(pair) {
 }
 
 async function saveConfig() {
+    const rawTp = document.getElementById("tp-percent").value;
+    const rawSl = document.getElementById("sl-percent").value;
     const body = {
         max_trade_usdt: parseFloat(document.getElementById("max-trade").value),
         max_daily_spend_usdt: parseFloat(document.getElementById("max-daily").value),
@@ -122,8 +148,9 @@ async function saveConfig() {
         dca_enabled: document.getElementById("dca-enabled").checked,
         dca_interval: parseInt(document.getElementById("dca-interval").value) || 3600,
         rsi_threshold: parseFloat(document.getElementById("rsi-threshold").value) || 30.0,
-        tp_percent: parseFloat(document.getElementById("tp-percent").value) || 5.0,
-        sl_percent: parseFloat(document.getElementById("sl-percent").value) || 3.0,
+        tp_percent: (rawTp !== "" && !isNaN(parseFloat(rawTp))) ? parseFloat(rawTp) : 5.0,
+        sl_enabled: document.getElementById("sl-enabled") ? document.getElementById("sl-enabled").checked : true,
+        sl_percent: (rawSl !== "" && !isNaN(parseFloat(rawSl))) ? parseFloat(rawSl) : 3.0,
         trailing_enabled: document.getElementById("trailing-enabled").checked,
         trailing_activation_percent: parseFloat(document.getElementById("trailing-activation").value) || 3.0,
         trailing_delta_percent: parseFloat(document.getElementById("trailing-delta").value) || 1.5,
@@ -182,8 +209,9 @@ async function testDiscordBot() {
         testnet: document.getElementById("testnet-mode").checked,
         dca_interval: parseInt(document.getElementById("dca-interval").value) || 3600,
         rsi_threshold: parseFloat(document.getElementById("rsi-threshold").value) || 30.0,
-        tp_percent: parseFloat(document.getElementById("tp-percent").value) || 5.0,
-        sl_percent: parseFloat(document.getElementById("sl-percent").value) || 3.0,
+        tp_percent: isNaN(parseFloat(document.getElementById("tp-percent").value)) ? 5.0 : parseFloat(document.getElementById("tp-percent").value),
+        sl_enabled: document.getElementById("sl-enabled") ? document.getElementById("sl-enabled").checked : true,
+        sl_percent: isNaN(parseFloat(document.getElementById("sl-percent").value)) ? 3.0 : parseFloat(document.getElementById("sl-percent").value),
         trailing_enabled: document.getElementById("trailing-enabled").checked,
         trailing_activation_percent: parseFloat(document.getElementById("trailing-activation").value) || 3.0,
         trailing_delta_percent: parseFloat(document.getElementById("trailing-delta").value) || 1.5,

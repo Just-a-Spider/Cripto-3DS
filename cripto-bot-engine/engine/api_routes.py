@@ -100,6 +100,7 @@ async def update_config(cfg: ConfigModel):
     state.rsi_strategy.oversold_rsi = cfg.rsi_threshold
     state.tpsl_strategy.tp_percent = cfg.tp_percent
     state.tpsl_strategy.sl_percent = cfg.sl_percent
+    state.tpsl_strategy.sl_enabled = bool(getattr(cfg, "sl_enabled", True))
     state.tpsl_strategy.trailing_enabled = cfg.trailing_enabled
     state.tpsl_strategy.trailing_activation_percent = cfg.trailing_activation_percent
     state.tpsl_strategy.trailing_delta_percent = cfg.trailing_delta_percent

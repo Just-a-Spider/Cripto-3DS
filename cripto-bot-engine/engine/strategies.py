@@ -250,11 +250,13 @@ class TPSLStrategy(BaseStrategy):
         trailing_delta_percent: float = 1.5,
         partial_tp_enabled: bool = False,
         partial_tp_percent: float = 4.0,
-        partial_tp_ratio: float = 0.5
+        partial_tp_ratio: float = 0.5,
+        sl_enabled: bool = True
     ):
         super().__init__("Take Profit / Stop Loss")
         self.tp_percent = tp_percent
         self.sl_percent = sl_percent
+        self.sl_enabled = sl_enabled
         self.trailing_enabled = trailing_enabled
         self.trailing_activation_percent = trailing_activation_percent
         self.trailing_delta_percent = trailing_delta_percent
@@ -340,8 +342,8 @@ class TPSLStrategy(BaseStrategy):
                                     "price": curr_price,
                                     "reason": f"Trailing Stop (Peak: ${new_peak:.2f}, Profit: +{profit_pct:.2f}%)"
                                 }
-                    # Hard Stop Loss check
-                    if profit_pct <= -self.sl_percent:
+                    # Hard Stop Loss check (only active if sl_enabled and sl_percent > 0)
+                    if self.sl_enabled and self.sl_percent > 0 and profit_pct <= -self.sl_percent:
                         if not self.is_cooling_down(pair, cooldown_hours):
                             self.record_signal(pair)
                             self.peak_prices.pop(pair, None)
@@ -368,7 +370,7 @@ class TPSLStrategy(BaseStrategy):
                                 "price": curr_price,
                                 "reason": f"Take Profit (+{profit_pct:.2f}%)"
                             }
-                    elif profit_pct <= -self.sl_percent:
+                    elif self.sl_enabled and self.sl_percent > 0 and profit_pct <= -self.sl_percent:
                         if not self.is_cooling_down(pair, cooldown_hours):
                             self.record_signal(pair)
                             self.tp_staged_positions.pop(pair, None)

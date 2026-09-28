@@ -216,3 +216,28 @@ def test_dca_strategy_evaluation():
     next_pair = pairs[(dca.current_index + 1) % len(pairs)]
     dca.cooldowns[next_pair] = time.time()
     assert dca.evaluate(prices, 500.0, pairs, cooldown_hours=1.0) is None
+
+
+@pytest.mark.asyncio
+async def test_stop_loss_disabled():
+    from engine.strategies import TPSLStrategy
+
+    # 1. SL enabled -> should trigger on -4% drawdown
+    tpsl_enabled = TPSLStrategy(tp_percent=5.0, sl_percent=3.0, trailing_enabled=False, sl_enabled=True)
+    portfolio = {"XLM": 100.0}
+    cost_bases = {"XLMUSDT": 0.20}
+    drawdown_prices = {"XLMUSDT": 0.19}  # -5% drawdown
+    sig = tpsl_enabled.evaluate_tpsl(drawdown_prices, portfolio, cost_bases)
+    assert sig is not None
+    assert sig["action"] == "SELL"
+    assert "Stop Loss" in sig["reason"]
+
+    # 2. SL disabled -> should NOT trigger on drawdown
+    tpsl_disabled = TPSLStrategy(tp_percent=5.0, sl_percent=3.0, trailing_enabled=False, sl_enabled=False)
+    sig_none = tpsl_disabled.evaluate_tpsl(drawdown_prices, portfolio, cost_bases)
+    assert sig_none is None
+
+    # 3. Trailing enabled but SL disabled -> should NOT trigger stop loss on drawdown
+    tpsl_trailing_no_sl = TPSLStrategy(tp_percent=5.0, sl_percent=3.0, trailing_enabled=True, sl_enabled=False)
+    sig_trailing_none = tpsl_trailing_no_sl.evaluate_tpsl(drawdown_prices, portfolio, cost_bases)
+    assert sig_trailing_none is None

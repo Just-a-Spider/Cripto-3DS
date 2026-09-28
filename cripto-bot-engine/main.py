@@ -73,6 +73,10 @@ async def lifespan(app: FastAPI):
     state.rsi_strategy.oversold_rsi = float(saved_cfg.get("rsi_threshold", 30.0))
     state.tpsl_strategy.tp_percent = float(saved_cfg.get("tp_percent", 5.0))
     state.tpsl_strategy.sl_percent = float(saved_cfg.get("sl_percent", 3.0))
+    raw_sl_enabled = saved_cfg.get("sl_enabled", True)
+    state.tpsl_strategy.sl_enabled = (
+        str(raw_sl_enabled).lower() in ("true", "1", "yes") if isinstance(raw_sl_enabled, str) else bool(raw_sl_enabled)
+    )
 
     raw_trailing = saved_cfg.get("trailing_enabled", True)
     state.tpsl_strategy.trailing_enabled = (
