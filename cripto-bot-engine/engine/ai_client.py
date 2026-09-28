@@ -303,17 +303,15 @@ async def call_gemini(
                 record_model_cooldown(clean_model, 600.0)
             logger.debug(f"Google GenAI SDK on {clean_model} (switching to HTTP fallback): {e}")
 
-    # Build strictly vetted candidate model list (never try arbitrary or non-text models)
+    # Build strictly vetted candidate model list (strictly configured primary and fallback models only)
     candidate_pool = [clean_model]
-    for fb in ACTIVE_GEMINI_PRIORITY:
-        if fb not in candidate_pool and not _is_unsupported_model(fb):
-            candidate_pool.append(fb)
+    fb_prov = getattr(state, "ai_fallback_provider", "")
+    fb_model = getattr(state, "ai_fallback_model", "")
+    if fb_prov == "google" and fb_model and fb_model != clean_model and not _is_unsupported_model(fb_model):
+        candidate_pool.append(fb_model)
 
     # Filter for healthy models not on circuit-breaker cooldown
-    healthy_models = [m for m in candidate_pool if not is_model_on_cooldown(m) and not _is_unsupported_model(m)]
-
-    # Cap to at most 2 attempts (primary + 1 fallback) during outages
-    healthy_models = healthy_models[:2]
+    healthy_models = [m for m in candidate_pool if not is_model_on_cooldown(m)]
 
     if not healthy_models:
         logger.info("All Gemini models currently on circuit-breaker cooldown. Bypassing Gemini to backup provider...")
@@ -385,13 +383,13 @@ async def call_gemini(
                     break
 
     # Secondary Provider Fallback
-    fb_prov = getattr(state, "ai_fallback_provider", "groq")
+    fb_prov = getattr(state, "ai_fallback_provider", "")
     if fb_prov == "groq":
         groq_key = getattr(state, "ai_fallback_api_key", "") or getattr(state, "groq_api_key", "")
         if groq_key:
-            groq_model = getattr(state, "ai_fallback_model", "llama-3.3-70b-versatile")
+            groq_model = getattr(state, "ai_fallback_model", "") or getattr(state, "groq_model", "qwen/qwen3.8-27b")
             if "gemini" in groq_model.lower():
-                groq_model = "llama-3.3-70b-versatile"
+                groq_model = getattr(state, "groq_model", "qwen/qwen3.8-27b")
             logger.info(f"Delegating to Groq secondary free LLM fallback ({groq_model})...")
             import sys
             ai_mod = sys.modules.get("engine.ai_analyst")
@@ -452,13 +450,20 @@ async def call_ai(
     target_model = model or getattr(state, "ai_model", DEFAULT_GEMINI_MODEL)
     target_key = api_key or getattr(state, "ai_api_key", "") or (getattr(state, "gemini_api_key", "") if target_prov == "google" else "")
     target_base = base_url or getattr(state, "ai_base_url", "")
-    fb_prov = getattr(state, "ai_fallback_provider", "groq")
-    fb_model = getattr(state, "ai_fallback_model", "llama-3.3-70b-versatile")
-    if fb_prov == "groq" and "gemini" in fb_model.lower():
-        fb_model = "llama-3.3-70b-versatile"
-    fb_key = getattr(state, "ai_fallback_api_key", "") or (
-        getattr(state, "gemini_api_key", "") if fb_prov == "google" else getattr(state, "groq_api_key", "")
-    )
+    fb_prov = getattr(state, "ai_fallback_provider", "")
+    fb_model = getattr(state, "ai_fallback_model", "")
+    fb_key = getattr(state, "ai_fallback_api_key", "")
+    if fb_prov == "google":
+        if not fb_model:
+            fb_model = "gemini-3.1-flash-lite"
+        # Validate fb_key: if empty or invalid project ID string, fallback to valid primary Google key
+        if not fb_key or not (fb_key.startswith("AIza") or fb_key.startswith("AQ.")):
+            fb_key = getattr(state, "gemini_api_key", "") or getattr(state, "ai_api_key", "")
+    elif fb_prov == "groq":
+        if not fb_key:
+            fb_key = getattr(state, "groq_api_key", "")
+        if not fb_model or "gemini" in fb_model.lower():
+            fb_model = getattr(state, "groq_model", "qwen/qwen3.8-27b")
 
     res = await execute_ai_completion(
         prompt=prompt,

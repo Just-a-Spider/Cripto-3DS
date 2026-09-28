@@ -139,6 +139,16 @@ async function populateAiSettingsUI(data) {
     if (fallbackKey && (data.has_ai_fallback || data.has_groq) && !fallbackKey.value) {
         fallbackKey.placeholder = "•••••••••••••••• (Saved)";
     }
+
+    const groundingCheck = document.getElementById("enable-search-grounding");
+    if (groundingCheck) {
+        groundingCheck.checked = Boolean(data.enable_search_grounding);
+    }
+
+    const searchModelInput = document.getElementById("gemini-search-model");
+    if (searchModelInput && data.gemini_search_model) {
+        searchModelInput.value = data.gemini_search_model;
+    }
 }
 
 function collectAiConfigPayload() {
@@ -150,6 +160,8 @@ function collectAiConfigPayload() {
     const fallbackProv = document.getElementById("ai-fallback-provider");
     const fallbackModel = document.getElementById("ai-fallback-model");
     const fallbackKey = document.getElementById("ai-fallback-key");
+    const groundingCheck = document.getElementById("enable-search-grounding");
+    const searchModelInput = document.getElementById("gemini-search-model");
 
     let chosenModel = modelSelect ? modelSelect.value : "gemini-3.1-flash";
     if (chosenModel === "custom" && customModelInput && customModelInput.value.trim()) {
@@ -171,6 +183,8 @@ function collectAiConfigPayload() {
         ai_fallback_provider: fbProv,
         ai_fallback_model: fbModel,
         ai_fallback_api_key: fbKey,
+        enable_search_grounding: groundingCheck ? groundingCheck.checked : false,
+        gemini_search_model: searchModelInput ? (searchModelInput.value.trim() || "gemini-3.1-flash-lite") : "gemini-3.1-flash-lite",
         // Sync legacy variables
         gemini_api_key: provider === "google" && apiKey ? apiKey : (document.getElementById("gemini-api-key")?.value || ""),
         gemini_model: chosenModel,

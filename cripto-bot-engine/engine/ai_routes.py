@@ -100,6 +100,9 @@ async def api_test_ai(req: AiTestRequest):
         elif not key and prov == "groq":
             key = getattr(state, "groq_api_key", "")
 
+    if prov == "google" and (not key or not (key.startswith("AIza") or key.startswith("AQ."))):
+        key = getattr(state, "gemini_api_key", "") or getattr(state, "ai_api_key", "")
+
     if not base and prov == getattr(state, "ai_provider", ""):
         base = getattr(state, "ai_base_url", "")
 

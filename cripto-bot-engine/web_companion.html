@@ -591,10 +591,23 @@
                     </div>
                 </div>
 
+                <div class="settings-card">
+                    <div class="settings-card-title">Google Search Grounding (Live Web News)</div>
+                    <div class="settings-toggle-card">
+                        <input type="checkbox" id="enable-search-grounding">
+                        <div style="flex: 1;">
+                            <label for="enable-search-grounding" class="settings-toggle-label">Enable Google Search Grounding</label>
+                            <div class="settings-hint">Disabled by default to conserve free tier API quota. When enabled, queries real-time web news and SEC filings for monitored assets.</div>
+                            <div style="margin-top: 8px; max-width: 320px;">
+                                <label>Search Grounding Model:</label>
+                                <input type="text" id="gemini-search-model" value="gemini-3.1-flash-lite" placeholder="gemini-3.1-flash-lite">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Hidden inputs for backward compatibility -->
                 <input type="hidden" id="gemini-api-key" value="">
-                <input type="hidden" id="gemini-search-model" value="gemini-3.1-flash-lite">
-                <input type="hidden" id="enable-search-grounding" value="false">
                 <input type="hidden" id="groq-api-key" value="">
                 <input type="hidden" id="groq-model" value="llama-3.3-70b-versatile">
             </div>

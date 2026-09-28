@@ -586,3 +586,64 @@ def test_extract_text_from_ai_message_and_multimodal_blocks():
         {"type": "text", "text": "RSI is 45 (Neutral)."}
     ]
     assert extract_text_from_ai_message(mixed) == "RSI is 45 (Neutral)."
+
+
+@pytest.mark.asyncio
+async def test_ai_model_probing_restriction_and_groq_bypass(monkeypatch):
+    import engine.ai_client as client_mod
+    from engine.state import state
+
+    # Configure Google primary and Google fallback
+    state.ai_provider = "google"
+    state.ai_model = "gemini-3.5-flash-lite"
+    state.gemini_api_key = "AIzaSyTestKey123"
+    state.ai_fallback_provider = "google"
+    state.ai_fallback_model = "gemini-3.1-flash-lite"
+    state.ai_fallback_api_key = "projects/382226373265" # invalid project string
+
+    tried_models = []
+    groq_called = []
+
+    # Mock call_groq to detect accidental Groq delegation
+    async def mock_call_groq(*args, **kwargs):
+        groq_called.append(kwargs.get("model"))
+        return "Groq reply"
+
+    monkeypatch.setattr(client_mod, "call_groq", mock_call_groq)
+
+    # Intercept HTTP requests in call_gemini
+    class MockResp:
+        status = 503
+        async def text(self):
+            return "503 UNAVAILABLE"
+        async def json(self):
+            return {}
+
+    class MockSession:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        def post(self, url, **kwargs):
+            import re
+            m = re.search(r"models/([^:]+):", url)
+            if m:
+                tried_models.append(m.group(1))
+            class PostCtx:
+                async def __aenter__(self):
+                    return MockResp()
+                async def __aexit__(self, *args):
+                    pass
+            return PostCtx()
+
+    import aiohttp
+    monkeypatch.setattr(aiohttp, "ClientSession", MockSession)
+
+    res = await client_mod.call_gemini("test prompt", "AIzaSyTestKey123", model="gemini-3.5-flash-lite")
+    assert res is None
+    # Crucial assertion: ONLY configured primary and configured fallback models were tried!
+    # No random unconfigured models from ACTIVE_GEMINI_PRIORITY like 'gemini-flash-lite-latest' or 'gemini-3.5-flash'
+    assert tried_models == ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+    # Groq was NOT called because fallback provider is google
+    assert groq_called == []
+

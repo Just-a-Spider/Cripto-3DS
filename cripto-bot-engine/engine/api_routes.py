@@ -192,6 +192,14 @@ async def update_config(cfg: ConfigModel):
     elif "ai_fallback_api_key" in saved_cfg:
         cfg_dict["ai_fallback_api_key"] = saved_cfg["ai_fallback_api_key"]
 
+    if state.ai_fallback_provider == "google":
+        if not state.ai_fallback_api_key or not (state.ai_fallback_api_key.startswith("AIza") or state.ai_fallback_api_key.startswith("AQ.")):
+            state.ai_fallback_api_key = state.gemini_api_key or state.ai_api_key
+            if state.ai_fallback_api_key:
+                cfg_dict["ai_fallback_api_key"] = cipher.encrypt(state.ai_fallback_api_key.encode()).decode()
+            else:
+                cfg_dict["ai_fallback_api_key"] = ""
+
     # Legacy variables
     if cfg.gemini_api_key:
         state.gemini_api_key = cfg.gemini_api_key.strip()
