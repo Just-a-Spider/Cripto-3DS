@@ -175,8 +175,39 @@ function collectAiConfigPayload() {
         gemini_api_key: provider === "google" && apiKey ? apiKey : (document.getElementById("gemini-api-key")?.value || ""),
         gemini_model: chosenModel,
         groq_api_key: fbProv === "groq" && fbKey ? fbKey : (document.getElementById("groq-api-key")?.value || ""),
-        groq_model: fbModel
+        groq_model: fbProv === "groq" ? fbModel : "llama-3.3-70b-versatile"
     };
+}
+
+function onAiFallbackProviderChanged() {
+    const fallbackProv = document.getElementById("ai-fallback-provider");
+    const fallbackModel = document.getElementById("ai-fallback-model");
+    const fallbackKey = document.getElementById("ai-fallback-key");
+    if (!fallbackProv || !fallbackModel) return;
+
+    const prov = fallbackProv.value;
+    if (prov === "google") {
+        if (!fallbackModel.value || fallbackModel.value.includes("llama")) {
+            fallbackModel.value = "gemini-3.1-flash";
+        }
+        if (fallbackKey && !fallbackKey.value) {
+            fallbackKey.placeholder = "Google Gemini API Key...";
+        }
+    } else if (prov === "groq") {
+        if (!fallbackModel.value || fallbackModel.value.includes("gemini")) {
+            fallbackModel.value = "llama-3.3-70b-versatile";
+        }
+        if (fallbackKey && !fallbackKey.value) {
+            fallbackKey.placeholder = "Groq Cloud API Key...";
+        }
+    } else if (prov === "openai") {
+        if (!fallbackModel.value || fallbackModel.value.includes("llama") || fallbackModel.value.includes("gemini")) {
+            fallbackModel.value = "gpt-4o-mini";
+        }
+        if (fallbackKey && !fallbackKey.value) {
+            fallbackKey.placeholder = "OpenAI API Key...";
+        }
+    }
 }
 
 async function testAiConnection() {
@@ -201,6 +232,45 @@ async function testAiConnection() {
                 model: payload.ai_model,
                 api_key: payload.ai_api_key,
                 base_url: payload.ai_base_url
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.status === "ok") {
+            statusBadge.innerHTML = `<span style="color: var(--green); font-weight: bold;">Connected (${data.latency_ms}ms) • ${data.model}</span>`;
+        } else {
+            const err = data.message || data.detail || "Connection failed";
+            statusBadge.innerHTML = `<span style="color: var(--red); font-size: 0.8rem;">Failed: ${err.substring(0, 100)}</span>`;
+        }
+    } catch (e) {
+        statusBadge.innerHTML = `<span style="color: var(--red); font-size: 0.8rem;">Network error: ${e.message}</span>`;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function testAiFallbackConnection() {
+    const btn = document.getElementById("btn-test-ai-fallback");
+    const statusBadge = document.getElementById("ai-fallback-test-status");
+    if (!statusBadge) return;
+
+    statusBadge.innerHTML = `<span style="color: var(--yellow);">Testing fallback connection...</span>`;
+    if (btn) btn.disabled = true;
+
+    const payload = collectAiConfigPayload();
+
+    try {
+        const res = await fetch(getApiBase() + "/api/ai/test", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-Auth-PIN": authPin
+            },
+            body: JSON.stringify({
+                provider: payload.ai_fallback_provider,
+                model: payload.ai_fallback_model,
+                api_key: payload.ai_fallback_api_key,
+                base_url: ""
             })
         });
 

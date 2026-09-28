@@ -221,7 +221,15 @@ async def update_config(cfg: ConfigModel):
         state.groq_api_key = saved_cfg.get("groq_api_key", state.groq_api_key)
         cfg_dict["groq_api_key"] = state.groq_api_key
 
-    state.groq_model = cfg.groq_model.strip() if getattr(cfg, "groq_model", None) else "llama-3.3-70b-versatile"
+    candidate_groq_model = cfg.groq_model.strip() if getattr(cfg, "groq_model", None) else ""
+    if candidate_groq_model and "gemini" not in candidate_groq_model.lower():
+        state.groq_model = candidate_groq_model
+    else:
+        saved_gm = saved_cfg.get("groq_model", "")
+        if saved_gm and "gemini" not in saved_gm.lower():
+            state.groq_model = saved_gm
+        else:
+            state.groq_model = "llama-3.3-70b-versatile"
     cfg_dict["groq_model"] = state.groq_model
 
     state.ai_scout_enabled = getattr(cfg, "ai_scout_enabled", True)

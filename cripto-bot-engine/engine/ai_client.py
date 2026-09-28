@@ -384,17 +384,34 @@ async def call_gemini(
                     logger.warning(f"Gemini API error on {m}: {type(e).__name__}: {e}")
                     break
 
-    # Secondary Free Provider Fallback: Groq (if configured)
-    groq_key = getattr(state, "groq_api_key", "")
-    if groq_key:
-        logger.info("Delegating to Groq secondary free LLM fallback...")
-        groq_model = getattr(state, "groq_model", "llama-3.3-70b-versatile")
-        import sys
-        ai_mod = sys.modules.get("engine.ai_analyst")
-        groq_fn = getattr(ai_mod, "call_groq", call_groq) if ai_mod else call_groq
-        res = await groq_fn(prompt, groq_key, model=groq_model, system_instruction=system_instruction, json_mode=json_mode)
-        if res:
-            return res
+    # Secondary Provider Fallback
+    fb_prov = getattr(state, "ai_fallback_provider", "groq")
+    if fb_prov == "groq":
+        groq_key = getattr(state, "ai_fallback_api_key", "") or getattr(state, "groq_api_key", "")
+        if groq_key:
+            groq_model = getattr(state, "ai_fallback_model", "llama-3.3-70b-versatile")
+            if "gemini" in groq_model.lower():
+                groq_model = "llama-3.3-70b-versatile"
+            logger.info(f"Delegating to Groq secondary free LLM fallback ({groq_model})...")
+            import sys
+            ai_mod = sys.modules.get("engine.ai_analyst")
+            groq_fn = getattr(ai_mod, "call_groq", call_groq) if ai_mod else call_groq
+            res = await groq_fn(prompt, groq_key, model=groq_model, system_instruction=system_instruction, json_mode=json_mode)
+            if res:
+                return res
+    elif fb_prov and fb_prov != "google":
+        fb_key = getattr(state, "ai_fallback_api_key", "")
+        fb_model = getattr(state, "ai_fallback_model", "")
+        if fb_key:
+            from engine.ai_provider import execute_ai_completion
+            return await execute_ai_completion(
+                prompt=prompt,
+                system_instruction=system_instruction,
+                json_mode=json_mode,
+                provider=fb_prov,
+                model=fb_model,
+                api_key=fb_key
+            )
 
     return None
 
@@ -437,7 +454,11 @@ async def call_ai(
     target_base = base_url or getattr(state, "ai_base_url", "")
     fb_prov = getattr(state, "ai_fallback_provider", "groq")
     fb_model = getattr(state, "ai_fallback_model", "llama-3.3-70b-versatile")
-    fb_key = getattr(state, "ai_fallback_api_key", "") or getattr(state, "groq_api_key", "")
+    if fb_prov == "groq" and "gemini" in fb_model.lower():
+        fb_model = "llama-3.3-70b-versatile"
+    fb_key = getattr(state, "ai_fallback_api_key", "") or (
+        getattr(state, "gemini_api_key", "") if fb_prov == "google" else getattr(state, "groq_api_key", "")
+    )
 
     res = await execute_ai_completion(
         prompt=prompt,

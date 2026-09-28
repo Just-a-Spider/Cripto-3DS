@@ -169,6 +169,8 @@ async def lifespan(app: FastAPI):
         state.ai_api_key = state.gemini_api_key
     if not state.ai_fallback_api_key and state.ai_fallback_provider == "groq" and state.groq_api_key:
         state.ai_fallback_api_key = state.groq_api_key
+    if not state.ai_fallback_api_key and state.ai_fallback_provider == "google" and state.gemini_api_key:
+        state.ai_fallback_api_key = state.gemini_api_key
 
     raw_ai_scout = saved_cfg.get("ai_scout_enabled", os.getenv("AI_SCOUT_ENABLED", "true"))
     state.ai_scout_enabled = str(raw_ai_scout).lower() in ("true", "1", "yes")

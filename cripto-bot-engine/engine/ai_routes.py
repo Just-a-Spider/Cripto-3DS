@@ -93,9 +93,11 @@ async def api_test_ai(req: AiTestRequest):
     if not key:
         if prov == getattr(state, "ai_provider", "google"):
             key = getattr(state, "ai_api_key", "")
-        elif prov == "google":
+        elif prov == getattr(state, "ai_fallback_provider", ""):
+            key = getattr(state, "ai_fallback_api_key", "")
+        if not key and prov == "google":
             key = getattr(state, "gemini_api_key", "")
-        elif prov == "groq":
+        elif not key and prov == "groq":
             key = getattr(state, "groq_api_key", "")
 
     if not base and prov == getattr(state, "ai_provider", ""):

@@ -549,7 +549,7 @@
                     <div class="grid">
                         <div>
                             <label>Fallback Provider:</label>
-                            <select id="ai-fallback-provider">
+                            <select id="ai-fallback-provider" onchange="onAiFallbackProviderChanged()">
                                 <option value="groq">Groq Cloud (Llama-3.3-70b Backup)</option>
                                 <option value="google">Google Gemini Backup</option>
                                 <option value="openai">OpenAI Backup</option>
@@ -563,6 +563,10 @@
                     <div style="margin-top: 10px;">
                         <label>Fallback API Key:</label>
                         <input type="password" id="ai-fallback-key" placeholder="Fallback Provider Key...">
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" id="btn-test-ai-fallback" class="btn btn-blue" onclick="testAiFallbackConnection()">TEST FALLBACK CONNECTION</button>
+                        <div id="ai-fallback-test-status" style="font-size: 0.85rem; font-weight: bold;"></div>
                     </div>
                 </div>
 
