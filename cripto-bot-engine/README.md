@@ -1,87 +1,103 @@
 # Cripto-3DS Bot Engine (`cripto-bot-engine`)
 
-A lightweight, high-performance Binance trading bot and Nintendo 3DS real-time telemetry server built with **Python**, **FastAPI**, and **AsyncIO**.
+A lightweight, high-performance Binance trading bot daemon and Nintendo 3DS real-time telemetry server built with **Python 3.11+**, **FastAPI**, and **AsyncIO**.
 
 ---
 
-## 🚀 Quick Start (Native `uv` Workflow)
+## Quick Start (Native `uv` Workflow)
 
-No `pip` or virtualenv activation needed! `uv` handles project sync, dependencies, and execution automatically.
+We use `uv` for dependency management and execution.
 
-### 1. Run the Bot Daemon & Web UI
+### 1. Environment Setup
 ```bash
 cd cripto-bot-engine
+
+# Copy template configuration
+cp .env.example .env
+
+# Or launch the interactive CLI setup wizard
+uv run python setup_env.py
+```
+
+### 2. Run the Bot Daemon & Web UI
+```bash
 uv run main.py
 ```
-- **Web UI Dashboard**: [`http://localhost:7344`](http://localhost:7344)
+- **Web UI Companion**: [http://localhost:7344/web](http://localhost:7344/web)
 - **3DS Socket Telemetry**: Listening on `0.0.0.0:7343`
 
-### 2. Managing Dependencies
+### 3. Run Automated Tests & Linting
 ```bash
-# Add main project dependency
-uv add <package-name>
+# Run full test suite (85 unit and integration tests)
+uv run pytest
 
-# Add dev dependency (e.g. testing/linting)
-uv add --group dev pytest pytest-asyncio httpx
-```
-
-### 3. Run Automated Tests
-```bash
-uv run --group dev pytest
+# Check code formatting & linting
+uv run ruff check .
 ```
 
 ---
 
-## ⚙️ Environment Configuration
+## Environment Configuration
 
-The engine reads credentials from environment files in the following priority order:
-1. `testnet.env` (Binance Testnet - Default for safe paper trading)
-2. `config.env` / `binance.env` (Live Production Binance Account)
+The engine reads credentials from `.env` in `cripto-bot-engine/`. See `.env.example` for full variable documentation.
 
-### `testnet.env` Example
-```env
-BINANCE_TESTNET=true
-BINANCE_API_KEY=your_testnet_api_key
-BINANCE_SECRET_KEY=your_testnet_secret_key
-SERVER_3DS_PORT=7343
-WEB_PORT=7344
-FAVORITE_PAIRS=BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT
-```
+### Core Variables
+- `BINANCE_TESTNET`: `true` for paper trading, `false` for live trading.
+- `BINANCE_API_KEY`: Binance account API key.
+- `BINANCE_SECRET_KEY`: Binance account secret key.
+- `AUTH_PIN`: 4-digit PIN for client-side encryption and sensitive API authorization.
+- `SERVER_3DS_PORT`: Port for raw 3DS TCP telemetry (default: `7343`).
+- `WEB_PORT`: Port for FastAPI REST API and WebSocket broadcaster (default: `7344`).
+- `AI_PROVIDER`: Multi-provider LLM support (`google`, `groq`, `openai`, `anthropic`, `ollama`, `deepseek`).
+- `AI_MODEL`: Primary quantitative risk model (default: `gemini-3.1-flash`).
 
 ---
 
-## 📡 Ports & Network Protocols
+## Ports & Network Protocols
 
 | Port | Protocol | Usage | Description |
-|---|---|---|---|
-| **7344** | HTTP / WS | Web UI & REST API | Serves interactive web config, live balance, and trade decision buttons. |
-| **7343** | TCP JSON | 3DS Telemetry | Emits rotating crypto price stream & receives touch commands (`APPROVE`, `REJECT`, `EMERGENCY_STOP`). |
+| :--- | :--- | :--- | :--- |
+| **7344** | HTTP / WS | Web UI & REST API | Serves glassmorphism dashboard, live portfolio stream (`/ws`), and trade approvals. |
+| **7343** | TCP JSON | 3DS Telemetry | Emits rotating crypto price stream & receives hardware commands (`APPROVE`, `REJECT`, `EMERGENCY_STOP`). |
+| **8022** | SSH | Termux Remote Access | OpenSSH port for low-power Android phone deployments. |
 
 ---
 
-## 🛡️ Safety Features & Timeout Watchdog
+## Safety Features & Watchdogs
 
-1. **Human Trade Approval**: Strategy signals generate a pending trade proposal.
-2. **10-Minute Auto-Cancel Watchdog**: If a trade proposal is not approved within **600 seconds** (10 minutes) via 3DS or Web UI, it automatically cancels.
-3. **Emergency Kill Switch**: Instantly pauses bot execution and cancels active orders via 3DS touch button or Web UI.
-4. **Binance CEX Only**: Operates strictly within Binance account balances—no connection to personal external wallets.
+1. **Human Trade Approval**: Algorithmic trade signals queue into pending state until explicitly confirmed via 3DS hardware button (`A`), Web Companion (`[Approve]`), or Discord (`[Approve]`).
+2. **Auto-Cancel Watchdog**: If a pending proposal is not confirmed within 600 seconds (10 minutes), it cancels automatically.
+3. **Emergency Kill Switch**: Instantly pauses bot execution and cancels active orders via 3DS (`Y` button) or Web UI.
+4. **Binance CEX Isolation**: Operates strictly within spot account balances—no access to private keys or external on-chain wallets.
 
 ---
 
-## 🐧 Installing as a Linux Systemd Service
+## Running as a Linux Systemd Service
 
-To keep `cripto-bot-engine` running in the background on system boot:
+To keep `cripto-bot-engine` running as a background service on a Linux server or desktop:
 
-```bash
-chmod +x install_service.sh
-sudo ./install_service.sh
+Create `/etc/systemd/system/cripto-bot.service`:
+```ini
+[Unit]
+Description=Cripto-3DS Bot Engine Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/path/to/Cripto-3DS/cripto-bot-engine
+ExecStart=/usr/local/bin/uv run main.py
+Restart=always
+RestartSec=5
+Environment=HEADLESS=true
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-### Control & View Logs
+Enable and start:
 ```bash
-# Check status
+sudo systemctl daemon-reload
+sudo systemctl enable --now cripto-bot
 sudo systemctl status cripto-bot
-
-# View live logs
-journalctl -u cripto-bot -f
 ```

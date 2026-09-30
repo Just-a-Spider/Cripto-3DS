@@ -206,32 +206,26 @@ tail -f ~/cripto-bot-engine/engine.log
 
 ---
 
-## 🧪 Test Suite & Quality Assurance
+## Test Suite & Quality Assurance
 
-Automated test suite (`tests/test_engine.py`) covering 17 end-to-end unit and integration tests:
+Automated test suite covering 85 end-to-end unit and integration tests:
 ```bash
-uv run pytest -v tests/test_engine.py
+cd cripto-bot-engine
+uv run pytest
 ```
-- ✅ `test_get_state_endpoint`: State structure & watchlist verification.
-- ✅ `test_bot_toggle_active`: Pause / Resume engine logic.
-- ✅ `test_simulate_trade_signal`: Signal creation & risk validation.
-- ✅ `test_trade_approval_flow`: Human approval & execution lifecycle.
-- ✅ `test_trade_rejection_flow`: Rejection & queue clearing.
-- ✅ `test_3ds_telemetry_pin_commands`: Raw TCP 3DS socket handshake.
-- ✅ `test_wilder_rsi_calculation`: Mathematical RSI precision test.
-- ✅ `test_bollinger_bands_calculation`: Standard deviation & envelope tests.
-- ✅ `test_format_and_validate_order`: LOT_SIZE and PRICE_FILTER exchange rules.
-- ✅ `test_trailing_stop_loss`: Dynamic high-watermark trailing stops.
-- ✅ `test_state_indicators`: Indicator serialization in state dict.
-- ✅ `test_trade_history_and_pnl`: Realized PnL and win-rate accounting.
-- ✅ `test_get_trades_endpoint`: Trade history REST API verification.
-- ✅ `test_gemini_analyst_fallback`: AI key omission & fallback resilience.
-- ✅ `test_chart_generator`: QuickChart v3 candlestick PNG buffer generation.
-- ✅ `test_gemini_state_and_config`: AI model state and discovery schema.
-- ✅ `test_clear_trade_history`: Database purge of rejected/test trades.
+- API Endpoints (`tests/integration/test_api_endpoints.py`): State structure, auth PIN enforcement, watchlist verification, trades clearing.
+- Telemetry & Discord (`tests/integration/test_telemetry_and_discord.py`): Raw TCP 3DS socket handshake and Discord Gateway buttons.
+- Trade Execution (`tests/integration/test_trades_execution.py`): Human approval/rejection lifecycle, LOT_SIZE/PRICE_FILTER rules, PnL accounting.
+- Watchdogs & Risk Scout (`tests/integration/test_watchdogs_and_scout.py`): 10-minute auto-cancel timeout, stop-loss protection, trailing stop loss.
+- Agentic Decision (`tests/unit/test_agentic_decision.py`): LLM trade risk evaluation and JSON schema validation.
+- AI Analyst (`tests/unit/test_ai_analyst.py`): Multi-provider LangChain engine (Gemini, Groq, fallback resilience).
+- History Analyzer (`tests/unit/test_history_analyzer.py`): Trade database aggregation, win-rate metrics, drawdown tracking.
+- News & Charts (`tests/unit/test_news_and_chart.py`): QuickChart candlestick rendering and sentiment grounding.
+- Quantitative Strategies (`tests/unit/test_strategies.py`): Wilder's 14-period RSI, Bollinger Bands %B, and DCA interval math.
 
 ---
 
-## ⚠️ Disclaimer
+## Disclaimer
 This software is an experimental open-source tool created for educational and personal research purposes. Cryptocurrency trading involves substantial financial risk. The authors assume no liability for financial losses.
+
 

@@ -221,6 +221,7 @@ async def test_ai_scout_parallel_multi_asset_staging(monkeypatch):
 @pytest.mark.asyncio
 async def test_ai_scout_does_not_sell_at_loss_when_sl_disabled(monkeypatch):
     import asyncio
+
     import engine.watchdogs as wd_mod
     from engine.state import state
 

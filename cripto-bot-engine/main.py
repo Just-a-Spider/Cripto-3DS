@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     risk_manager.max_daily_spend_usdt = float(saved_cfg.get("max_daily_spend_usdt", 200.0))
     risk_manager.min_usdt_reserve = float(saved_cfg.get("min_usdt_reserve", 20.0))
 
-    raw_approval = saved_cfg.get("require_human_approval", False)
+    raw_approval = saved_cfg.get("require_human_approval", True)
     risk_manager.require_human_approval = (
         str(raw_approval).lower() in ("true", "1", "yes") if isinstance(raw_approval, str) else bool(raw_approval)
     )
@@ -243,7 +243,8 @@ async def lifespan(app: FastAPI):
 
         asyncio.create_task(init_agentic_review())
 
-    asyncio.create_task(start_3ds_tcp_server())
+    server_3ds_port = int(os.getenv("SERVER_3DS_PORT", "7343"))
+    asyncio.create_task(start_3ds_tcp_server(port=server_3ds_port))
     asyncio.create_task(trade_timeout_watchdog())
     asyncio.create_task(cost_basis_watchdog())
     asyncio.create_task(ai_opportunity_scout_watchdog())
@@ -272,6 +273,6 @@ app.include_router(ai_router)
 
 if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "7344"))
+    port = int(os.getenv("WEB_PORT") or os.getenv("PORT", "7344"))
     logger.info(f"Starting Cripto-3DS Bot Engine on {host}:{port}...")
     uvicorn.run(app, host=host, port=port)

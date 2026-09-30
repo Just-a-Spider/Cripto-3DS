@@ -208,29 +208,10 @@ SERVER_3DS_PORT={server_port}
 WEB_PORT={web_port}
 HEADLESS={headless}
 
-# --- Risk Management & Watchlist ---
-MAX_TRADE_USDT={existing_values.get('MAX_TRADE_USDT', '50.0')}
-MAX_DAILY_SPEND_USDT={existing_values.get('MAX_DAILY_SPEND_USDT', '200.0')}
-MIN_USDT_RESERVE={existing_values.get('MIN_USDT_RESERVE', '20.0')}
-REQUIRE_HUMAN_APPROVAL={existing_values.get('REQUIRE_HUMAN_APPROVAL', 'true')}
-FAVORITE_PAIRS={existing_values.get('FAVORITE_PAIRS', 'BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT')}
-
-# --- Trading Strategy Parameters ---
-DCA_INTERVAL={existing_values.get('DCA_INTERVAL', '3600')}
-RSI_THRESHOLD={existing_values.get('RSI_THRESHOLD', '30.0')}
-TP_PERCENT={existing_values.get('TP_PERCENT', '5.0')}
-SL_PERCENT={existing_values.get('SL_PERCENT', '3.0')}
-TRAILING_ENABLED={existing_values.get('TRAILING_ENABLED', 'true')}
-TRAILING_ACTIVATION_PERCENT={existing_values.get('TRAILING_ACTIVATION_PERCENT', '3.0')}
-TRAILING_DELTA_PERCENT={existing_values.get('TRAILING_DELTA_PERCENT', '1.5')}
-PARTIAL_TP_ENABLED={existing_values.get('PARTIAL_TP_ENABLED', 'true')}
-PARTIAL_TP_PERCENT={existing_values.get('PARTIAL_TP_PERCENT', '4.0')}
-PARTIAL_TP_RATIO={existing_values.get('PARTIAL_TP_RATIO', '0.5')}
-BULL_REGIME_DIP_ENABLED={existing_values.get('BULL_REGIME_DIP_ENABLED', 'true')}
-BULL_RSI_THRESHOLD={existing_values.get('BULL_RSI_THRESHOLD', '42.0')}
-AI_SCOUT_ENABLED={existing_values.get('AI_SCOUT_ENABLED', 'true')}
-AI_SCOUT_INTERVAL_HOURS={existing_values.get('AI_SCOUT_INTERVAL_HOURS', '2.0')}
-AI_SCOUT_MIN_CONFIDENCE={existing_values.get('AI_SCOUT_MIN_CONFIDENCE', '0.85')}
+# --- Note: Trading Strategies & Risk Limits ---
+# Quantitative trading settings (RSI, DCA, Stop Loss, Trailing Stops, Max Spend, etc.)
+# are dynamically managed from the Web Companion UI (http://localhost:{web_port}/web)
+# and safely persisted in the SQLite database (bot_data.db).
 """
 
     env_path.parent.mkdir(parents=True, exist_ok=True)
