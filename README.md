@@ -207,6 +207,7 @@ Cripto-3DS/
 │   └── README.md               # Engine documentation & systemd guide
 │
 ├── CONTRIBUTING.md             # Developer workflow, style guide, and testing
+├── DISCLAIMER.md               # Legal disclaimers, trademark & liability notices
 ├── PROJECT_SUMMARY.md          # Architectural deep dive and hardware specs
 ├── LICENSE                     # MIT License
 └── README.md                   # Repository overview
@@ -220,6 +221,12 @@ Contributions, bug reports, and hardware testing feedback are welcome. Please re
 
 ---
 
-## Disclaimer
+## Legal Disclaimers & Assumption of Risk
 
-This software is an experimental open-source research tool designed for educational and study purposes. Cryptocurrency trading involves substantial financial risk and market volatility. The authors and contributors assume no liability for financial losses incurred through the use of this software. Always test thoroughly using Binance Testnet before deploying real funds.
+1. **No Financial or Investment Advice**: This software is provided strictly for educational, research, and technical experimentation purposes. Nothing in this codebase, documentation, or companion tools constitutes investment, financial, trading, or legal advice. The authors and contributors do not act as investment advisers, broker-dealers, or fiduciaries.
+2. **Capital Loss & Algorithmic Risk**: Cryptocurrency trading involves extreme market volatility and risk of total capital loss. Automated indicators, DCA routines, and AI models (Gemini, Groq, Ollama) can produce errors, hallucinations, or execution delays. Under no circumstances shall the authors or contributors be liable for any direct, indirect, or consequential trading losses.
+3. **Trademark & Non-Affiliation**: "Nintendo", "3DS", "Binance", "Discord", and "Google" are registered trademarks of their respective owners. This project is an independent, unofficial open-source research initiative and is NOT affiliated with, sponsored by, or endorsed by Nintendo Co., Ltd., Binance Holdings Ltd., Discord Inc., or Google LLC. No proprietary SDKs, keys, or copyrighted binaries are distributed.
+4. **Hardware & Console Safety**: Running custom firmware (Luma3DS), homebrew (`.3dsx`), or FBI packages (`.cia`) carries inherent risk of operating system corruption, bricking, or vendor account suspension. Operating continuous edge daemon workloads on mobile phones carries thermal and battery degradation risks. Users assume all hardware responsibility.
+5. **Regulatory Compliance**: Users are solely responsible for compliance with all applicable local financial regulations, tax obligations, and third-party Terms of Use (including Binance API regional restrictions).
+
+> For complete legal terms, warranty disclaimers, and liability limitations, see [DISCLAIMER.md](DISCLAIMER.md).

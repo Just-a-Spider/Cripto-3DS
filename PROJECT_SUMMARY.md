@@ -225,7 +225,8 @@ uv run pytest
 
 ---
 
-## Disclaimer
-This software is an experimental open-source tool created for educational and personal research purposes. Cryptocurrency trading involves substantial financial risk. The authors assume no liability for financial losses.
+## Legal Disclaimer & Assumption of Risk
+This software is an experimental open-source tool created for educational and personal research purposes. Cryptocurrency trading involves substantial financial risk and market volatility. The authors assume no liability for financial losses, hardware faults, or exchange actions. See [DISCLAIMER.md](DISCLAIMER.md) for full legal disclosures, trademark notices, and liability limits.
+
 
 
