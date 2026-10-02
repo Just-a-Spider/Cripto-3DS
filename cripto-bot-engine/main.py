@@ -18,6 +18,7 @@ from engine.state import get_cipher, state
 from engine.telemetry import start_3ds_tcp_server
 from engine.watchdogs import (
     ai_opportunity_scout_watchdog,
+    binance_connection_watchdog,
     cost_basis_watchdog,
     trade_timeout_watchdog,
 )
@@ -248,6 +249,7 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(trade_timeout_watchdog())
     asyncio.create_task(cost_basis_watchdog())
     asyncio.create_task(ai_opportunity_scout_watchdog())
+    asyncio.create_task(binance_connection_watchdog())
     asyncio.create_task(start_binance_websocket())
 
     yield

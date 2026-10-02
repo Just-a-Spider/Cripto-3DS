@@ -113,6 +113,9 @@ class BotState:
         self.api_key: str = ""
         self.secret_key: str = ""
         self.ws_tasks = []
+        self.last_ws_message_time: float = 0.0
+        self.ws_connect_time: float = 0.0
+        self.is_reconnecting_ws: bool = False
         self.dca_strategy = DCAStrategy()
         self.dca_strategy.enabled = False
         self.signal_cooldown_hours: float = 24.0

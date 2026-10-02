@@ -237,3 +237,46 @@ async def ai_opportunity_scout_watchdog():
             logger.error(f"Error in AI Opportunity Scout watchdog: {e}")
 
         await asyncio.sleep(15)
+
+
+async def binance_connection_watchdog(initial_delay: float = 15.0):
+    """
+    Supervises Binance WebSocket stream health.
+    Detects dead/silent sockets, dead background tasks, and proactively rotates before 24h limit.
+    """
+    logger.info("Started Binance Connection Watchdog.")
+    if initial_delay > 0:
+        await asyncio.sleep(initial_delay)
+    while True:
+        try:
+            if state.api_key and not state.is_reconnecting_ws:
+                now = time.time()
+                reconnect_reason = None
+
+                if state.ws_tasks:
+                    crashed_or_done = [t for t in state.ws_tasks if t.done()]
+                    if crashed_or_done:
+                        reconnect_reason = f"{len(crashed_or_done)} WS listener task(s) stopped unexpectedly"
+                elif state.api_key:
+                    reconnect_reason = "No active Binance WS listener tasks running"
+
+                if not reconnect_reason and state.favorite_pairs and state.last_ws_message_time > 0:
+                    silence_duration = now - state.last_ws_message_time
+                    if silence_duration > 120.0:
+                        reconnect_reason = f"Market data stream silent for {int(silence_duration)}s (exceeded 120s threshold)"
+
+                if not reconnect_reason and state.ws_connect_time > 0:
+                    connection_age = now - state.ws_connect_time
+                    if connection_age > 72000.0:  # 20 hours
+                        reconnect_reason = f"Proactive rotation: connection age reached {connection_age / 3600:.1f}h (approaching 24h limit)"
+
+                if reconnect_reason:
+                    logger.warning(f"Binance connection watchdog triggered reconnect: {reconnect_reason}")
+                    from engine.binance_client import restart_binance_websocket
+                    await restart_binance_websocket()
+                    await broadcast_state()
+        except Exception as e:
+            logger.error(f"Error in Binance connection watchdog: {e}")
+
+        await asyncio.sleep(30)
+

@@ -21,6 +21,10 @@ async def listen_user_data(bm):
                     res = await stream.recv()
                     if not res:
                         break
+                    if res.get('e') == 'error':
+                        logger.warning(f"User stream error message received: {res}")
+                        break
+                    state.last_ws_message_time = time.time()
                     if res.get('e') == 'outboundAccountPosition':
                         for bal in res.get('B', []):
                             amt = float(bal['f'])
@@ -48,9 +52,17 @@ async def listen_market_data(bm):
             async with bm.multiplex_socket(streams) as stream:
                 backoff = 1
                 while True:
-                    res = await stream.recv()
+                    try:
+                        res = await asyncio.wait_for(stream.recv(), timeout=45.0)
+                    except asyncio.TimeoutError:
+                        logger.warning("Market stream recv timed out (45s silence). Exiting socket to reconnect.")
+                        break
                     if not res:
                         break
+                    if res.get('e') == 'error':
+                        logger.warning(f"Market stream error message received: {res}")
+                        break
+                    state.last_ws_message_time = time.time()
                     if 'data' in res:
                         data = res['data']
                         symbol = data.get('s')
@@ -180,6 +192,8 @@ async def start_binance_websocket():
         except Exception as e:
             logger.warning(f"Could not fetch account balance or RSI history initially: {e}")
 
+        state.ws_connect_time = time.time()
+        state.last_ws_message_time = time.time()
         bm = BinanceSocketManager(client)
         t1 = asyncio.create_task(listen_user_data(bm))
         t2 = asyncio.create_task(listen_market_data(bm))
@@ -188,10 +202,29 @@ async def start_binance_websocket():
         logger.error(f"Failed to start Binance WebSockets: {e}")
 
 async def restart_binance_websocket():
-    for task in state.ws_tasks:
-        task.cancel()
-    state.ws_tasks = []
-    if state.binance_client:
-        await state.binance_client.close_connection()
-        state.binance_client = None
-    await start_binance_websocket()
+    if state.is_reconnecting_ws:
+        logger.info("Binance WS restart already in progress, skipping duplicate request.")
+        return
+    state.is_reconnecting_ws = True
+    try:
+        logger.info("Restarting Binance WebSocket connection...")
+        tasks_to_cancel = list(state.ws_tasks)
+        state.ws_tasks = []
+        for task in tasks_to_cancel:
+            task.cancel()
+        if tasks_to_cancel:
+            await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
+
+        if state.binance_client:
+            try:
+                await state.binance_client.close_connection()
+            except Exception as e:
+                logger.warning(f"Error closing previous Binance client session: {e}")
+            finally:
+                state.binance_client = None
+
+        await start_binance_websocket()
+    except Exception as e:
+        logger.error(f"Error during Binance WS restart: {e}")
+    finally:
+        state.is_reconnecting_ws = False
